@@ -20,6 +20,16 @@ if (Test-Path $OutputDir) { Remove-Item $OutputDir -Recurse -Force }
 New-Item -ItemType Directory -Path $OutputDir -Force | Out-Null
 New-Item -ItemType Directory -Path $StagingDir -Force | Out-Null
 
+# Validate signing certificate early and use its exact subject in manifest Publisher.
+if (-not (Test-Path $PfxPath)) { throw "Certificate not found at $PfxPath. See SETUP_SECRETS.md." }
+if (-not $PfxPassword) { throw "PfxPassword is required. Set env:SIGNING_CERTIFICATE_PASSWORD or pass -PfxPassword." }
+$certFlags = [Security.Cryptography.X509Certificates.X509KeyStorageFlags]::Exportable `
+    -bor [Security.Cryptography.X509Certificates.X509KeyStorageFlags]::EphemeralKeySet
+$signingCert = [Security.Cryptography.X509Certificates.X509Certificate2]::new($PfxPath, $PfxPassword, $certFlags)
+if (-not $signingCert.HasPrivateKey) { throw "PFX does not contain a private key: $PfxPath" }
+$publisherSubject = $signingCert.Subject
+Write-Host "Using signing certificate subject: $publisherSubject" -ForegroundColor Gray
+
 # 2. Publish self-contained app
 Write-Host "Publishing app..." -ForegroundColor Yellow
 dotnet publish $AppProject `
@@ -37,10 +47,15 @@ if ($LASTEXITCODE -ne 0) { throw "dotnet publish failed" }
 Write-Host "Staging MSIX layout..." -ForegroundColor Yellow
 Copy-Item "$PublishDir\*" $StagingDir -Recurse
 
-# Copy manifest (update version)
-$manifest = Get-Content "$PackagingDir\Package.appxmanifest" -Raw
-$manifest = $manifest -replace 'Version="1\.0\.0\.0"', "Version=`"$Version`""
-Set-Content "$StagingDir\AppxManifest.xml" $manifest -Encoding UTF8
+# Copy manifest (update version and Publisher to match signing cert)
+[xml]$manifestXml = Get-Content "$PackagingDir\Package.appxmanifest"
+$ns = [System.Xml.XmlNamespaceManager]::new($manifestXml.NameTable)
+$ns.AddNamespace("m", "http://schemas.microsoft.com/appx/manifest/foundation/windows10")
+$identity = $manifestXml.SelectSingleNode("/m:Package/m:Identity", $ns)
+if (-not $identity) { throw "Identity node not found in Package.appxmanifest." }
+$identity.SetAttribute("Version", $Version)
+$identity.SetAttribute("Publisher", $publisherSubject)
+$manifestXml.Save("$StagingDir\AppxManifest.xml")
 
 # Copy assets
 $assetsTarget = "$StagingDir\Assets"
@@ -65,9 +80,7 @@ Write-Host "Creating MSIX package..." -ForegroundColor Yellow
 if ($LASTEXITCODE -ne 0) { throw "MakeAppx failed" }
 
 # 6. Sign with persistent certificate
-if (-not (Test-Path $PfxPath)) { throw "Certificate not found at $PfxPath. See SETUP_SECRETS.md." }
-if (-not $PfxPassword) { throw "PfxPassword is required. Set env:SIGNING_CERTIFICATE_PASSWORD or pass -PfxPassword." }
-& $signTool sign /fd SHA256 /a /f $PfxPath /p $PfxPassword $msixPath
+& $signTool sign /fd SHA256 /td SHA256 /f $PfxPath /p $PfxPassword /v $msixPath
 if ($LASTEXITCODE -ne 0) { Write-Warning "Signing failed - MSIX will require manual signing" }
 
 # 7. Create portable zip
