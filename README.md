@@ -21,7 +21,6 @@
   <a href="#usage">Usage</a> &bull;
   <a href="#architecture">Architecture</a> &bull;
   <a href="#support">Support</a> &bull;
-  <a href="#development">Development</a> &bull;
   <a href="#license">License</a>
 </p>
 
@@ -168,32 +167,6 @@ If Prompt Clipboard saves you time, you can support development:
 - Network note: send only via `Bitcoin (BTC mainnet)`
 - Crypto support (ETH on BSC/BEP20): `0xfb096327df1ac8fd715d9fdf08196fa2ade2ce37`
 - Network note: send only via `BNB Smart Chain (BEP20)`
-
-## Development
-
-### Build
-
-```bash
-dotnet build
-```
-
-### Test
-
-```bash
-dotnet test
-```
-
-### Publish (self-contained)
-
-```bash
-dotnet publish src/PromptClipboard.App -c Release -r win-x64 --self-contained -o ./publish
-```
-
-### Generate screenshots
-
-```powershell
-powershell -ExecutionPolicy Bypass -File scripts/capture-screenshots.ps1 -Configuration Release
-```
 
 ## License
 
