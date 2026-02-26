@@ -103,15 +103,27 @@ jobs:
       - name: Create MSIX package
         shell: pwsh
         run: |
-          $sdkDir = Get-ChildItem "C:\Program Files (x86)\Windows Kits\10\bin\10.*\x64" -Directory |
-            Sort-Object Name -Descending | Select-Object -First 1
-          $makeAppx = Join-Path $sdkDir.FullName "makeappx.exe"
-          $signTool = Join-Path $sdkDir.FullName "signtool.exe"
+          # Find makeappx.exe by searching for the actual file
+          $found = Get-ChildItem "C:\Program Files (x86)\Windows Kits\10\bin\*\x64\makeappx.exe" -ErrorAction SilentlyContinue |
+            Sort-Object { [version]($_.Directory.Parent.Name) } -Descending |
+            Select-Object -First 1
+
+          if (-not $found) {
+            Write-Error "makeappx.exe not found. Available SDK dirs:"
+            Get-ChildItem "C:\Program Files (x86)\Windows Kits\10\bin" -Directory | ForEach-Object { Write-Host "  $_" }
+            exit 1
+          }
+
+          $makeAppx = $found.FullName
+          $signTool = Join-Path $found.Directory.FullName "signtool.exe"
+          Write-Host "Using SDK tools from: $($found.Directory.FullName)"
 
           $msixPath = "artifacts/PromptClipboard-${{ steps.version.outputs.version }}-x64.msix"
 
           & $makeAppx pack /d "artifacts/msix-staging" /p $msixPath /o
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           & $signTool sign /fd SHA256 /a /f "artifacts/cert.pfx" /p "msix-build" $msixPath
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2

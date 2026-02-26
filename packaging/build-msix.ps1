@@ -45,18 +45,16 @@ $assetsTarget = "$StagingDir\Assets"
 New-Item -ItemType Directory -Path $assetsTarget -Force | Out-Null
 Copy-Item "$PackagingDir\Assets\*" $assetsTarget
 
-# 4. Find MakeAppx.exe
-$sdkDir = Get-ChildItem "C:\Program Files (x86)\Windows Kits\10\bin\10.*\x64" -Directory |
-    Sort-Object Name -Descending | Select-Object -First 1
-if (-not $sdkDir) {
-    $sdkDir = Get-ChildItem "C:\Program Files (x86)\Windows Kits\10\bin\*\x64" -Directory |
-        Sort-Object Name -Descending | Select-Object -First 1
-}
+# 4. Find MakeAppx.exe — search for the actual file, not just the directory
+$found = Get-ChildItem "C:\Program Files (x86)\Windows Kits\10\bin\*\x64\makeappx.exe" -ErrorAction SilentlyContinue |
+    Sort-Object { [version]($_.Directory.Parent.Name) } -Descending |
+    Select-Object -First 1
 
-$makeAppx = Join-Path $sdkDir.FullName "makeappx.exe"
-$signTool = Join-Path $sdkDir.FullName "signtool.exe"
+if (-not $found) { throw "MakeAppx.exe not found. Install Windows 10 SDK with 'App packaging tools'." }
 
-if (-not (Test-Path $makeAppx)) { throw "MakeAppx.exe not found. Install Windows 10 SDK." }
+$makeAppx = $found.FullName
+$signTool = Join-Path $found.Directory.FullName "signtool.exe"
+Write-Host "Using SDK tools from: $($found.Directory.FullName)" -ForegroundColor Gray
 
 # 5. Create MSIX
 $msixPath = "$OutputDir\PromptClipboard-$Version-x64.msix"
