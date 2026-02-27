@@ -31,6 +31,7 @@
 - **Global hotkey** (`Ctrl+Shift+Q`) — summon the palette from any app, paste directly
 - **Smart search** — fuzzy matching, tag filtering (`#tag`), language filter (`lang:ru`)
 - **Template variables** — `{{name}}`, defaults (`{{tone|default=formal}}`), interactive dialog
+- **Smart body preview** — long prompts show a condensed first line with metadata badge and expandable preview
 - **Pin & organize** — pin frequently used prompts, tag-based organization
 - **Instant paste** — copies to clipboard and simulates Ctrl+V into the target window
 - **Caret-aware positioning** — palette appears near the text cursor
@@ -162,4 +163,5 @@ If Prompt Clipboard saves you time, you can support development:
 
 ## License
 
-[MIT](LICENSE)
+Prompt Clipboard is licensed under the GNU General Public License v3.0 or later (`GPL-3.0-or-later`).
+See [LICENSE](LICENSE) for the full text.
