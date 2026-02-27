@@ -147,6 +147,10 @@ jobs:
       - name: Install sqlite3
         run: choco install sqlite -y --no-progress
 
+      - name: List artifacts
+        shell: pwsh
+        run: Get-ChildItem artifacts/velopack/ -Recurse | Format-Table Name, Length -AutoSize
+
       - name: Packaging smoke test
         shell: pwsh
         run: |
@@ -162,10 +166,12 @@ jobs:
               Get-Process -Name "PromptClipboard.App" -ErrorAction SilentlyContinue | Stop-Process -Force
               Start-Sleep -Seconds 1
 
-              # 1. Verify artifacts exist and have minimum size
-              $setup = Get-Item "artifacts/velopack/PromptClipboard-Setup.exe"
+              # 1. Verify artifacts exist and have minimum size (wildcard for platform-prefixed names)
+              $setup = Get-ChildItem "artifacts/velopack/*Setup*.exe" | Select-Object -First 1
+              if (!$setup) { throw "No Setup exe found in artifacts/velopack/" }
               if ($setup.Length -lt 10MB) { throw "Setup too small: $($setup.Length)" }
-              $portable = Get-Item "artifacts/velopack/PromptClipboard-Portable.zip"
+              $portable = Get-ChildItem "artifacts/velopack/*Portable*.zip" | Select-Object -First 1
+              if (!$portable) { throw "No Portable zip found in artifacts/velopack/" }
               if ($portable.Length -lt 10MB) { throw "Portable zip too small: $($portable.Length)" }
 
               # 2. Extract portable zip (no installer CLI issues)
