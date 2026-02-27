@@ -136,13 +136,16 @@ jobs:
 
   packaging-smoke:
     needs: build-and-test
-    runs-on: self-hosted-windows-interactive
+    runs-on: windows-latest
 
     steps:
       - uses: actions/download-artifact@v4
         with:
           name: velopack-artifacts
           path: artifacts/velopack/
+
+      - name: Install sqlite3
+        run: choco install sqlite -y --no-progress
 
       - name: Packaging smoke test
         shell: pwsh
