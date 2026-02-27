@@ -154,12 +154,11 @@ jobs:
       - name: Packaging smoke test
         shell: pwsh
         run: |
-          # 0. Isolate appdata to avoid false positives from old data
+          # 0. Prepare temp dirs for smoke
           $smokeId = [Guid]::NewGuid().ToString("N")
-          $smokeAppData = "$env:TEMP\PCSmoke_AppData_$smokeId"
-          $smokeLocalAppData = "$env:TEMP\PCSmoke_LocalAppData_$smokeId"
           $extractDir = "$env:TEMP\PCSmoke_App_$smokeId"
-          New-Item -ItemType Directory -Path $smokeAppData, $smokeLocalAppData, $extractDir -Force | Out-Null
+          $realAppDataDir = Join-Path ([Environment]::GetFolderPath([Environment+SpecialFolder]::ApplicationData)) "PromptClipboard"
+          New-Item -ItemType Directory -Path $extractDir -Force | Out-Null
 
           try {
               # 0b. Kill any running instance (single-instance mutex prevents second launch)
@@ -177,9 +176,7 @@ jobs:
               # 2. Extract portable zip (no installer CLI issues)
               Expand-Archive $portable.FullName -DestinationPath $extractDir
 
-              # 3. Launch app with isolated appdata
-              $env:APPDATA = $smokeAppData
-              $env:LOCALAPPDATA = $smokeLocalAppData
+              # 3. Launch app (GetFolderPath ignores $env:APPDATA, so no override needed)
               $appExe = Get-ChildItem -Path $extractDir -Recurse -File -Filter "PromptClipboard.App.exe" | Select-Object -First 1
               if (!$appExe) {
                   Write-Host "Extracted portable contents:"
@@ -192,8 +189,12 @@ jobs:
               # 4. Verify process is running
               if ($proc.HasExited) { throw "App crashed on startup, exit code: $($proc.ExitCode)" }
 
-              # 5. Verify DB migration ran in isolated appdata
-              $dbPath = "$smokeAppData\PromptClipboard\prompts.db"
+              # 5. Verify DB migration ran (app uses GetFolderPath → real APPDATA)
+              $dbPath = Join-Path $realAppDataDir "prompts.db"
+              $deadline = (Get-Date).AddSeconds(30)
+              while (!(Test-Path $dbPath) -and (Get-Date) -lt $deadline) {
+                  Start-Sleep -Milliseconds 500
+              }
               if (!(Test-Path $dbPath)) { throw "Database not created at $dbPath" }
 
               # 5b. Verify actual tables exist (not just file presence)
@@ -209,8 +210,8 @@ jobs:
               Write-Host "Packaging smoke PASSED"
           }
           finally {
-              # 7. Cleanup: always remove temp dirs
-              @($smokeAppData, $smokeLocalAppData, $extractDir) | ForEach-Object {
+              # 7. Cleanup
+              @($extractDir, $realAppDataDir) | ForEach-Object {
                   Remove-Item $_ -Recurse -Force -ErrorAction SilentlyContinue
               }
           }
