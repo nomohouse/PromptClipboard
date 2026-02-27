@@ -180,7 +180,13 @@ jobs:
               # 3. Launch app with isolated appdata
               $env:APPDATA = $smokeAppData
               $env:LOCALAPPDATA = $smokeLocalAppData
-              $proc = Start-Process "$extractDir\PromptClipboard.App.exe" -PassThru
+              $appExe = Get-ChildItem -Path $extractDir -Recurse -File -Filter "PromptClipboard.App.exe" | Select-Object -First 1
+              if (!$appExe) {
+                  Write-Host "Extracted portable contents:"
+                  Get-ChildItem -Path $extractDir -Recurse | Select-Object FullName, Length | Format-Table -AutoSize
+                  throw "PromptClipboard.App.exe not found after extracting portable package"
+              }
+              $proc = Start-Process $appExe.FullName -PassThru
               Start-Sleep -Seconds 5
 
               # 4. Verify process is running
