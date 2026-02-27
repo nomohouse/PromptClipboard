@@ -26,20 +26,54 @@ jobs:
       - name: Build
         run: dotnet build --no-restore --configuration Release
 
-      - name: Test
-        run: dotnet test --no-build --configuration Release --verbosity normal
+      - name: Test with coverage
+        shell: pwsh
+        run: |
+          dotnet test --no-build -c Release `
+            --filter "Category!=E2E&Category!=Visual&Category!=Smoke" `
+            /p:CollectCoverage=true `
+            /p:CoverletOutputFormat=cobertura `
+            /p:CoverletOutput=./coverage/ `
+            /p:ExcludeByAttribute="GeneratedCodeAttribute" `
+            /p:ExcludeByFile="**/obj/**/*.cs"
 
-  package:
-    needs: build-and-test
-    runs-on: windows-latest
+      - name: Check coverage threshold
+        shell: pwsh
+        run: |
+          $coberturaFiles = Get-ChildItem -Recurse -Filter "*.cobertura.xml" -Path tests
+          if ($coberturaFiles.Count -eq 0) {
+            Write-Error "No Cobertura coverage files found"
+            exit 1
+          }
 
-    steps:
-      - uses: actions/checkout@v4
+          $totalLines = 0
+          $coveredLines = 0
+          foreach ($file in $coberturaFiles) {
+            [xml]$xml = Get-Content $file.FullName
+            # Skip files with 0 valid lines (E2E, TestContracts — no SRC code)
+            $linesValid = [int]$xml.coverage.'lines-valid'
+            if ($linesValid -eq 0) {
+              Write-Host "Skipping $($file.Name) — 0 lines-valid"
+              continue
+            }
+            $lineRate = [double]$xml.coverage.'line-rate'
+            $lines = [int]($xml.coverage.packages.package | ForEach-Object {
+              $_.classes.class | ForEach-Object { $_.lines.line }
+            } | Measure-Object).Count
+            if ($lines -eq 0) { $lines = 1 }
+            $totalLines += $lines
+            $coveredLines += [math]::Round($lineRate * $lines)
+          }
 
-      - name: Setup .NET
-        uses: actions/setup-dotnet@v4
-        with:
-          dotnet-version: 8.0.x
+          $globalCoverage = if ($totalLines -gt 0) { [math]::Round(($coveredLines / $totalLines) * 100, 2) } else { 0 }
+          Write-Host "Global line coverage: $globalCoverage%"
+
+          $threshold = 25
+          if ($globalCoverage -lt $threshold) {
+            Write-Error "Coverage $globalCoverage% is below threshold $threshold%"
+            exit 1
+          }
+          Write-Host "Coverage gate PASSED ($globalCoverage% >= $threshold%)"
 
       - name: Extract version from tag
         id: version
@@ -93,6 +127,103 @@ jobs:
             --icon src/PromptClipboard.App/Resources/app.ico `
             --outputDir artifacts/velopack
 
+      - name: Upload Velopack artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: velopack-artifacts
+          path: artifacts/velopack/
+          retention-days: 1
+
+  packaging-smoke:
+    needs: build-and-test
+    runs-on: self-hosted-windows-interactive
+
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: velopack-artifacts
+          path: artifacts/velopack/
+
+      - name: Packaging smoke test
+        shell: pwsh
+        run: |
+          # 0. Isolate appdata to avoid false positives from old data
+          $smokeId = [Guid]::NewGuid().ToString("N")
+          $smokeAppData = "$env:TEMP\PCSmoke_AppData_$smokeId"
+          $smokeLocalAppData = "$env:TEMP\PCSmoke_LocalAppData_$smokeId"
+          $extractDir = "$env:TEMP\PCSmoke_App_$smokeId"
+          New-Item -ItemType Directory -Path $smokeAppData, $smokeLocalAppData, $extractDir -Force | Out-Null
+
+          try {
+              # 0b. Kill any running instance (single-instance mutex prevents second launch)
+              Get-Process -Name "PromptClipboard.App" -ErrorAction SilentlyContinue | Stop-Process -Force
+              Start-Sleep -Seconds 1
+
+              # 1. Verify artifacts exist and have minimum size
+              $setup = Get-Item "artifacts/velopack/PromptClipboard-Setup.exe"
+              if ($setup.Length -lt 10MB) { throw "Setup too small: $($setup.Length)" }
+              $portable = Get-Item "artifacts/velopack/PromptClipboard-Portable.zip"
+              if ($portable.Length -lt 10MB) { throw "Portable zip too small: $($portable.Length)" }
+
+              # 2. Extract portable zip (no installer CLI issues)
+              Expand-Archive $portable.FullName -DestinationPath $extractDir
+
+              # 3. Launch app with isolated appdata
+              $env:APPDATA = $smokeAppData
+              $env:LOCALAPPDATA = $smokeLocalAppData
+              $proc = Start-Process "$extractDir\PromptClipboard.App.exe" -PassThru
+              Start-Sleep -Seconds 5
+
+              # 4. Verify process is running
+              if ($proc.HasExited) { throw "App crashed on startup, exit code: $($proc.ExitCode)" }
+
+              # 5. Verify DB migration ran in isolated appdata
+              $dbPath = "$smokeAppData\PromptClipboard\prompts.db"
+              if (!(Test-Path $dbPath)) { throw "Database not created at $dbPath" }
+
+              # 5b. Verify actual tables exist (not just file presence)
+              $tables = & sqlite3 $dbPath ".tables"
+              if ($LASTEXITCODE -ne 0) { throw "sqlite3 not found or failed. Install sqlite3 on self-hosted runner." }
+              if ($tables -notmatch "prompts") { throw "Table 'prompts' not found. Tables: $tables" }
+              if ($tables -notmatch "schema_migrations") { throw "Table 'schema_migrations' not found. Tables: $tables" }
+
+              # 6. Clean shutdown
+              $proc.CloseMainWindow() | Out-Null
+              if (!$proc.WaitForExit(10000)) { $proc.Kill() }
+
+              Write-Host "Packaging smoke PASSED"
+          }
+          finally {
+              # 7. Cleanup: always remove temp dirs
+              @($smokeAppData, $smokeLocalAppData, $extractDir) | ForEach-Object {
+                  Remove-Item $_ -Recurse -Force -ErrorAction SilentlyContinue
+              }
+          }
+
+  publish-release:
+    needs: packaging-smoke
+    runs-on: windows-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+
+      - name: Install vpk CLI
+        shell: pwsh
+        run: |
+          dotnet tool install -g vpk --version 0.0.1298
+          $toolPath = "$env:USERPROFILE\.dotnet\tools"
+          Add-Content $env:GITHUB_PATH $toolPath
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: velopack-artifacts
+          path: artifacts/velopack/
+
       - name: Upload to GitHub Release
         shell: pwsh
         run: |
@@ -101,6 +232,6 @@ jobs:
             --token "${{ secrets.GITHUB_TOKEN }}" `
             --outputDir artifacts/velopack `
             --publish `
-            --releaseName "Prompt Clipboard v${{ steps.version.outputs.version }}" `
-            --tag "v${{ steps.version.outputs.version }}" `
+            --releaseName "Prompt Clipboard ${{ github.ref_name }}" `
+            --tag "${{ github.ref_name }}" `
             --merge

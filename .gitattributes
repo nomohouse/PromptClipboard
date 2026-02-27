@@ -8,3 +8,7 @@
 *.jpg binary
 *.jpeg binary
 *.db binary
+
+# Verify snapshot baselines
+*.verified.txt text eol=lf
+*.verified.png binary

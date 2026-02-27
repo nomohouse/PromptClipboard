@@ -24,5 +24,76 @@ jobs:
       - name: Build
         run: dotnet build --no-restore --configuration Release
 
-      - name: Test
-        run: dotnet test --no-build --configuration Release --verbosity normal
+      - name: Test with coverage
+        shell: pwsh
+        run: |
+          dotnet test --no-build -c Release `
+            --filter "Category!=E2E&Category!=Visual&Category!=Smoke" `
+            /p:CollectCoverage=true `
+            /p:CoverletOutputFormat=cobertura `
+            /p:CoverletOutput=./coverage/ `
+            /p:ExcludeByAttribute="GeneratedCodeAttribute" `
+            /p:ExcludeByFile="**/obj/**/*.cs"
+
+      - name: Install ReportGenerator
+        run: dotnet tool install -g dotnet-reportgenerator-globaltool
+
+      - name: Add dotnet tools to PATH
+        shell: pwsh
+        run: Add-Content $env:GITHUB_PATH "$env:USERPROFILE\.dotnet\tools"
+
+      - name: Generate coverage report
+        shell: pwsh
+        run: |
+          $reports = (Get-ChildItem -Recurse -Filter "*.cobertura.xml" -Path tests).FullName -join ";"
+          if ($reports) {
+            reportgenerator "-reports:$reports" "-targetdir:coverage-report"
+          } else {
+            Write-Host "No coverage files found, skipping report generation"
+          }
+
+      - name: Check coverage threshold
+        shell: pwsh
+        run: |
+          $coberturaFiles = Get-ChildItem -Recurse -Filter "*.cobertura.xml" -Path tests
+          if ($coberturaFiles.Count -eq 0) {
+            Write-Error "No Cobertura coverage files found"
+            exit 1
+          }
+
+          $totalLines = 0
+          $coveredLines = 0
+          foreach ($file in $coberturaFiles) {
+            [xml]$xml = Get-Content $file.FullName
+            # Skip files with 0 valid lines (E2E, TestContracts — no SRC code)
+            $linesValid = [int]$xml.coverage.'lines-valid'
+            if ($linesValid -eq 0) {
+              Write-Host "Skipping $($file.Name) — 0 lines-valid"
+              continue
+            }
+            $lineRate = [double]$xml.coverage.'line-rate'
+            $lines = [int]($xml.coverage.packages.package | ForEach-Object {
+              $_.classes.class | ForEach-Object { $_.lines.line }
+            } | Measure-Object).Count
+            if ($lines -eq 0) { $lines = 1 }
+            $totalLines += $lines
+            $coveredLines += [math]::Round($lineRate * $lines)
+          }
+
+          $globalCoverage = if ($totalLines -gt 0) { [math]::Round(($coveredLines / $totalLines) * 100, 2) } else { 0 }
+          Write-Host "Global line coverage: $globalCoverage%"
+
+          $threshold = 25
+          if ($globalCoverage -lt $threshold) {
+            Write-Error "Coverage $globalCoverage% is below threshold $threshold%"
+            exit 1
+          }
+          Write-Host "Coverage gate PASSED ($globalCoverage% >= $threshold%)"
+
+      - name: Upload coverage report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-report
+          path: coverage-report/
+          retention-days: 14

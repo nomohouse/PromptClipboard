@@ -19,6 +19,7 @@ public sealed class PastePromptUseCase
     // Configurable delays
     public int PrePasteDelayMs { get; set; } = 50;
     public int PostPasteDelayMs { get; set; } = 150;
+    public int FocusSettleDelayMs { get; set; } = 150;
 
     public PastePromptUseCase(
         IPromptRepository repository,
@@ -74,7 +75,7 @@ public sealed class PastePromptUseCase
             }
 
             // Give the target window time to settle after receiving focus
-            await Task.Delay(150);
+            await Task.Delay(FocusSettleDelayMs);
 
             // Simple flow like Windows clipboard (Win+V):
             // 1. Set text on clipboard

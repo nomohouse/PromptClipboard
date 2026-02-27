@@ -58,5 +58,13 @@ packaging/node_modules/
 packaging/package.json
 packaging/package-lock.json
 
+## Test coverage output
+coverage/
+**/coverage/
+*.cobertura.xml
+
+## Runtime artifacts
+docs/screenshots/_runtime/
+
 ## Certificates (private keys only — .cer is public and tracked)
 *.pfx

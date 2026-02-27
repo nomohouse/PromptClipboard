@@ -1,0 +1,83 @@
+name: Nightly
+
+on:
+  schedule:
+    - cron: '0 3 * * *'
+  workflow_dispatch:
+
+jobs:
+  unit-and-integration:
+    runs-on: windows-latest
+    timeout-minutes: 15
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+
+      - name: Restore
+        run: dotnet restore
+
+      - name: Build
+        run: dotnet build --no-restore --configuration Release
+
+      - name: Run unit, integration and snapshot tests with coverage
+        shell: pwsh
+        run: |
+          dotnet test --no-build -c Release `
+            --filter "Category!=E2E&Category!=Visual&Category!=Smoke" `
+            /p:CollectCoverage=true `
+            /p:CoverletOutputFormat=cobertura `
+            /p:CoverletOutput=./coverage/ `
+            /p:ExcludeByAttribute="GeneratedCodeAttribute" `
+            /p:ExcludeByFile="**/obj/**/*.cs"
+
+      - name: Upload coverage artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: nightly-coverage
+          path: tests/**/coverage/*.cobertura.xml
+          retention-days: 7
+
+  visual-and-e2e:
+    runs-on: self-hosted-windows-interactive
+    timeout-minutes: 30
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+
+      - name: Restore
+        run: dotnet restore
+
+      - name: Build
+        run: dotnet build --no-restore --configuration Release
+
+      - name: Kill existing app instances
+        shell: pwsh
+        run: |
+          Get-Process -Name "PromptClipboard.App" -ErrorAction SilentlyContinue | Stop-Process -Force
+          Start-Sleep -Seconds 1
+
+      - name: Run visual and E2E tests
+        shell: pwsh
+        run: |
+          dotnet test --no-build -c Release `
+            --filter "Category=Visual|Category=E2E" `
+            --verbosity normal
+
+      - name: Upload visual diff artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: visual-diffs
+          path: tests/**/*.received.png
+          retention-days: 7

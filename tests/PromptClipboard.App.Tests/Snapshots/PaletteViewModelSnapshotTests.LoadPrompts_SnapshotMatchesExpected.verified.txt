@@ -1,0 +1,30 @@
+﻿[
+  {
+    Title: Greeting,
+    Body: Hello {{name}},
+    Tags: [
+      greeting,
+      template
+    ],
+    Folder: general,
+    IsPinned: true,
+    IsExpanded: false,
+    IsLongBody: false
+  },
+  {
+    Title: Code Review,
+    Body:
+Please review this code:
+```
+{{code}}
+```,
+    Tags: [
+      dev,
+      review
+    ],
+    Folder: dev,
+    IsPinned: false,
+    IsExpanded: false,
+    IsLongBody: true
+  }
+]

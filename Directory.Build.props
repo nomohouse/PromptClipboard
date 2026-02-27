@@ -5,4 +5,10 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
   </PropertyGroup>
+
+  <!-- Coverage exclusions for source-generated code (CommunityToolkit.Mvvm, JSON source gen) -->
+  <PropertyGroup Condition="'$(CollectCoverage)' == 'true'">
+    <ExcludeByAttribute>GeneratedCodeAttribute</ExcludeByAttribute>
+    <ExcludeByFile>**/obj/**/*.cs</ExcludeByFile>
+  </PropertyGroup>
 </Project>
