@@ -6,7 +6,7 @@ using PromptClipboard.Domain.Entities;
 using PromptClipboard.Domain.Interfaces;
 using PromptClipboard.Domain.Models;
 
-public sealed class SqlitePromptRepository : IPromptRepository, IAdvancedSearchRepository
+public sealed class SqlitePromptRepository : IPromptRepository, IAdvancedSearchRepository, ITagSuggestionRepository, IDuplicateDetectionRepository
 {
     private readonly SqliteConnectionFactory _factory;
 
@@ -107,8 +107,8 @@ public sealed class SqlitePromptRepository : IPromptRepository, IAdvancedSearchR
         using var conn = _factory.CreateConnection();
         using var cmd = conn.CreateCommand();
         cmd.CommandText = """
-            INSERT INTO prompts (title, body, tags_json, tags_text, folder, created_at, updated_at, last_used_at, use_count, is_pinned, lang, model_hint, version_parent_id)
-            VALUES (@title, @body, @tags_json, @tags_text, @folder, @created_at, @updated_at, @last_used_at, @use_count, @is_pinned, @lang, @model_hint, @version_parent_id);
+            INSERT INTO prompts (title, body, tags_json, tags_text, folder, created_at, updated_at, last_used_at, use_count, is_pinned, lang, model_hint, version_parent_id, body_hash)
+            VALUES (@title, @body, @tags_json, @tags_text, @folder, @created_at, @updated_at, @last_used_at, @use_count, @is_pinned, @lang, @model_hint, @version_parent_id, @body_hash);
             SELECT last_insert_rowid();
         """;
         AddPromptParams(cmd, prompt);
@@ -125,7 +125,8 @@ public sealed class SqlitePromptRepository : IPromptRepository, IAdvancedSearchR
                 title = @title, body = @body, tags_json = @tags_json, tags_text = @tags_text,
                 folder = @folder, updated_at = @updated_at, last_used_at = @last_used_at,
                 use_count = @use_count, is_pinned = @is_pinned, lang = @lang,
-                model_hint = @model_hint, version_parent_id = @version_parent_id
+                model_hint = @model_hint, version_parent_id = @version_parent_id,
+                body_hash = @body_hash
             WHERE id = @id
         """;
         cmd.Parameters.AddWithValue("@id", prompt.Id);
@@ -190,6 +191,7 @@ public sealed class SqlitePromptRepository : IPromptRepository, IAdvancedSearchR
         cmd.Parameters.AddWithValue("@lang", p.Lang);
         cmd.Parameters.AddWithValue("@model_hint", p.ModelHint);
         cmd.Parameters.AddWithValue("@version_parent_id", p.VersionParentId ?? (object)DBNull.Value);
+        cmd.Parameters.AddWithValue("@body_hash", (object?)BodyHasher.ComputeHash(p.Body) ?? DBNull.Value);
     }
 
     private static async Task<List<Prompt>> ReadPromptsAsync(SqliteCommand cmd, CancellationToken ct)
@@ -342,6 +344,62 @@ public sealed class SqlitePromptRepository : IPromptRepository, IAdvancedSearchR
         return await ReadPromptsAsync(cmd, ct);
     }
 
+    public async Task<List<string>> GetAllTagsAsync(CancellationToken ct = default)
+    {
+        using var conn = _factory.CreateConnection();
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText = """
+            SELECT DISTINCT LOWER(TRIM(j.value))
+            FROM prompts p, json_each(p.tags_json) j
+            WHERE json_valid(p.tags_json) AND TRIM(j.value) != ''
+            ORDER BY 1
+        """;
+
+        var tags = new List<string>();
+        await Task.Run(() =>
+        {
+            using var reader = cmd.ExecuteReader();
+            while (reader.Read())
+                tags.Add(reader.GetString(0));
+        }, ct);
+        return tags;
+    }
+
+    public async Task<List<Prompt>> FindCandidatesAsync(string title, string body, int limit = 10, CancellationToken ct = default)
+    {
+        using var conn = _factory.CreateConnection();
+
+        // First check exact body_hash match
+        var bodyHash = BodyHasher.ComputeHash(body);
+        using var hashCmd = conn.CreateCommand();
+        hashCmd.CommandText = "SELECT * FROM prompts WHERE body_hash = @hash LIMIT @limit";
+        hashCmd.Parameters.AddWithValue("@hash", bodyHash);
+        hashCmd.Parameters.AddWithValue("@limit", limit);
+        var exactMatches = await ReadPromptsAsync(hashCmd, ct);
+        if (exactMatches.Count > 0)
+            return exactMatches;
+
+        // FTS candidates from title + body
+        var searchTerms = (title + " " + body).Split(' ', StringSplitOptions.RemoveEmptyEntries);
+        if (searchTerms.Length == 0)
+            return [];
+
+        var ftsQuery = string.Join(" OR ",
+            searchTerms.Take(5).Select(t => "\"" + t.Replace("\"", "\"\"") + "\""));
+
+        using var ftsCmd = conn.CreateCommand();
+        ftsCmd.CommandText = """
+            SELECT p.* FROM prompts p
+            INNER JOIN prompts_fts ON prompts_fts.rowid = p.id
+            WHERE prompts_fts MATCH @query
+            ORDER BY bm25(prompts_fts, 10.0, 5.0, 1.0)
+            LIMIT @limit
+        """;
+        ftsCmd.Parameters.AddWithValue("@query", ftsQuery);
+        ftsCmd.Parameters.AddWithValue("@limit", limit);
+        return await ReadPromptsAsync(ftsCmd, ct);
+    }
+
     private static string EscapeLike(string word)
         => word.Replace("\\", "\\\\").Replace("%", "\\%").Replace("_", "\\_");
 
@@ -353,7 +411,7 @@ public sealed class SqlitePromptRepository : IPromptRepository, IAdvancedSearchR
 
     private static Prompt MapPrompt(SqliteDataReader r)
     {
-        return new Prompt
+        var prompt = new Prompt
         {
             Id = r.GetInt64(r.GetOrdinal("id")),
             Title = r.GetString(r.GetOrdinal("title")),
@@ -370,5 +428,15 @@ public sealed class SqlitePromptRepository : IPromptRepository, IAdvancedSearchR
             ModelHint = r.GetString(r.GetOrdinal("model_hint")),
             VersionParentId = r.IsDBNull(r.GetOrdinal("version_parent_id")) ? null : r.GetInt64(r.GetOrdinal("version_parent_id"))
         };
+
+        // body_hash column may not exist on pre-V003b databases
+        try
+        {
+            var ordinal = r.GetOrdinal("body_hash");
+            prompt.BodyHash = r.IsDBNull(ordinal) ? null : r.GetString(ordinal);
+        }
+        catch (ArgumentOutOfRangeException) { }
+
+        return prompt;
     }
 }

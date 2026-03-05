@@ -39,6 +39,9 @@ public partial class PaletteViewModel : ObservableObject
     private PromptItemViewModel? _revealedPrompt;
 
     [ObservableProperty]
+    private PaletteMode _mode = PaletteMode.List;
+
+    [ObservableProperty]
     private string _searchText = string.Empty;
 
     [ObservableProperty]
@@ -105,6 +108,8 @@ public partial class PaletteViewModel : ObservableObject
 
     public bool ShowRevealedPrompt => RevealedPrompt != null;
 
+    public QuickAddViewModel? QuickAdd { get; private set; }
+
     public event Action<Prompt>? PasteRequested;
     public event Action<Prompt>? PasteAsTextRequested;
     public event Action<Prompt>? EditRequested;
@@ -128,6 +133,14 @@ public partial class PaletteViewModel : ObservableObject
             OnPropertyChanged(nameof(ShowEmptyDatabase));
             OnPropertyChanged(nameof(ShowNoResults));
         };
+    }
+
+    public void InitializeQuickAdd(QuickAddViewModel quickAdd)
+    {
+        QuickAdd = quickAdd;
+        QuickAdd.PromptCreated += OnPromptCreated;
+        QuickAdd.Cancelled += () => Mode = PaletteMode.List;
+        OnPropertyChanged(nameof(QuickAdd));
     }
 
     public void OnPaletteHidden()
@@ -347,6 +360,12 @@ public partial class PaletteViewModel : ObservableObject
     [RelayCommand]
     private void HandleEscape()
     {
+        if (Mode == PaletteMode.QuickAdd)
+        {
+            QuickAdd?.Cancel();
+            Mode = PaletteMode.List;
+            return;
+        }
         if (!string.IsNullOrEmpty(SearchText))
             SearchText = string.Empty;
         else
@@ -426,6 +445,101 @@ public partial class PaletteViewModel : ObservableObject
         {
             _log.Error(ex, "RequeryAsync failed");
         }
+    }
+
+    // ── P2.5: Post-creation navigation ──────────────────────────────────
+
+    private CancellationTokenSource? _focusCts;
+
+    private void OnPromptCreated(long id)
+    {
+        Mode = PaletteMode.List;
+        _ = FocusOnNewPromptAsync(id);
+    }
+
+    private async Task FocusOnNewPromptAsync(long id)
+    {
+        _focusCts?.Cancel();
+        _focusCts = new CancellationTokenSource();
+        var ct = _focusCts.Token;
+
+        try
+        {
+            await RefreshTotalCountAsync(ct);
+            await LoadPromptsAsync(ct: ct);
+            ct.ThrowIfCancellationRequested();
+
+            var target = Prompts.FirstOrDefault(p => p.Prompt.Id == id);
+            if (target != null)
+            {
+                SelectedIndex = Prompts.IndexOf(target);
+                SelectedPrompt = target;
+                return;
+            }
+
+            _pendingNewPromptId = id;
+            OnPropertyChanged(nameof(ShowNewPromptBanner));
+            SelectedIndex = Prompts.Count > 0 ? 0 : -1;
+            SelectedPrompt = Prompts.Count > 0 ? Prompts[0] : null;
+        }
+        catch (OperationCanceledException) { }
+        catch (Exception ex)
+        {
+            _log.Error(ex, "FocusOnNewPrompt failed for id={Id}", id);
+        }
+    }
+
+    [RelayCommand]
+    private async Task RevealNewPrompt()
+    {
+        if (_pendingNewPromptId is not { } id) return;
+        _pendingNewPromptId = null;
+        OnPropertyChanged(nameof(ShowNewPromptBanner));
+
+        _suppressRequery = true;
+        try
+        {
+            SearchText = string.Empty;
+            IsFilterPinned = false;
+            IsFilterRecent = false;
+            IsFilterTemplates = false;
+            CurrentSortMode = SortMode.Relevance;
+        }
+        finally { _suppressRequery = false; }
+
+        await LoadPromptsAsync();
+        var target = Prompts.FirstOrDefault(p => p.Prompt.Id == id);
+        if (target != null)
+        {
+            SelectedIndex = Prompts.IndexOf(target);
+            SelectedPrompt = target;
+            return;
+        }
+
+        var created = await _repository.GetByIdAsync(id);
+        if (created != null)
+        {
+            RevealedPrompt = new PromptItemViewModel(created);
+            SelectedIndex = -1;
+            SelectedPrompt = RevealedPrompt;
+            return;
+        }
+
+        _log.Warning("RevealNewPrompt: id={Id} no longer exists", id);
+        SelectedIndex = Prompts.Count > 0 ? 0 : -1;
+        SelectedPrompt = Prompts.Count > 0 ? Prompts[0] : null;
+    }
+
+    [RelayCommand]
+    private void EnterQuickAdd()
+    {
+        if (QuickAdd == null) return;
+        var parsed = SearchQueryParser.Parse(SearchText);
+        var title = string.Join(" ", parsed.FreeTextTerms).Trim();
+        var tag = parsed.IncludeTags.Count > 0 ? parsed.IncludeTags[0] : null;
+        var lang = parsed.LangFilter;
+        QuickAdd.Show(title, tag, lang);
+        Mode = PaletteMode.QuickAdd;
     }
 
     // ── P1: BuildCurrentQuery ───────────────────────────────────────────

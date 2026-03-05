@@ -428,6 +428,97 @@ public class SqlitePromptRepositoryTests : IDisposable
         Assert.Equal("English", results[0].Title);
     }
 
+    // ── P2: V003b body_hash tests ─────────────────────────────────────
+
+    [Fact]
+    public void V003b_BodyHash_ColumnExists()
+    {
+        // V003b migration runs in setup — verify column exists
+        using var conn = new SqliteConnection(_connection.ConnectionString);
+        conn.Open();
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText = "SELECT COUNT(*) FROM pragma_table_info('prompts') WHERE name='body_hash'";
+        var count = (long)cmd.ExecuteScalar()!;
+        Assert.Equal(1, count);
+    }
+
+    [Fact]
+    public async Task V003b_CreateAsync_StoresBodyHash()
+    {
+        var id = await _repo.CreateAsync(new Prompt { Title = "Test", Body = "Hello world" });
+        var prompt = await _repo.GetByIdAsync(id);
+        Assert.NotNull(prompt);
+        Assert.NotNull(prompt!.BodyHash);
+        Assert.Equal(64, prompt.BodyHash!.Length); // SHA256 hex
+    }
+
+    [Fact]
+    public async Task V003b_UpdateAsync_UpdatesBodyHash()
+    {
+        var id = await _repo.CreateAsync(new Prompt { Title = "Test", Body = "Original" });
+        var prompt = await _repo.GetByIdAsync(id);
+        var originalHash = prompt!.BodyHash;
+
+        prompt.Body = "Modified";
+        await _repo.UpdateAsync(prompt);
+
+        var updated = await _repo.GetByIdAsync(id);
+        Assert.NotEqual(originalHash, updated!.BodyHash);
+    }
+
+    [Fact]
+    public async Task V003b_SameBody_SameHash()
+    {
+        var id1 = await _repo.CreateAsync(new Prompt { Title = "A", Body = "Same body" });
+        var id2 = await _repo.CreateAsync(new Prompt { Title = "B", Body = "Same body" });
+
+        var p1 = await _repo.GetByIdAsync(id1);
+        var p2 = await _repo.GetByIdAsync(id2);
+
+        Assert.Equal(p1!.BodyHash, p2!.BodyHash);
+    }
+
+    // ── P2: Tag suggestion tests ────────────────────────────────────
+
+    [Fact]
+    public async Task GetAllTags_ReturnsDistinct()
+    {
+        var p1 = new Prompt { Title = "A", Body = "B" };
+        p1.SetTags(["email", "work"]);
+        await _repo.CreateAsync(p1);
+
+        var p2 = new Prompt { Title = "C", Body = "D" };
+        p2.SetTags(["email", "personal"]);
+        await _repo.CreateAsync(p2);
+
+        var tags = await _repo.GetAllTagsAsync();
+        Assert.Equal(3, tags.Count);
+        Assert.Contains("email", tags);
+        Assert.Contains("work", tags);
+        Assert.Contains("personal", tags);
+    }
+
+    // ── P2: Duplicate detection tests ───────────────────────────────
+
+    [Fact]
+    public async Task FindCandidates_ExactBodyHash_ReturnsMatch()
+    {
+        await _repo.CreateAsync(new Prompt { Title = "Original", Body = "Unique content here" });
+
+        var candidates = await _repo.FindCandidatesAsync("Different title", "Unique content here");
+        Assert.Single(candidates);
+        Assert.Equal("Original", candidates[0].Title);
+    }
+
+    [Fact]
+    public async Task FindCandidates_NoMatch_ReturnsEmpty()
+    {
+        await _repo.CreateAsync(new Prompt { Title = "A", Body = "Completely different" });
+
+        var candidates = await _repo.FindCandidatesAsync("Test", "xyzzy");
+        Assert.Empty(candidates);
+    }
+
     public void Dispose()
     {
         _connection.Dispose();

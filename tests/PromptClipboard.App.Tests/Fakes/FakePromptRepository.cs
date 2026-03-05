@@ -5,7 +5,7 @@ using PromptClipboard.Domain.Entities;
 using PromptClipboard.Domain.Interfaces;
 using PromptClipboard.Domain.Models;
 
-internal class FakePromptRepository : IPromptRepository, IAdvancedSearchRepository
+internal class FakePromptRepository : IPromptRepository, IAdvancedSearchRepository, ITagSuggestionRepository, IDuplicateDetectionRepository
 {
     public List<Prompt> Prompts { get; set; } = [];
     public bool ThrowOnSearch { get; set; }
@@ -70,6 +70,17 @@ internal class FakePromptRepository : IPromptRepository, IAdvancedSearchReposito
     public Task MarkUsedAsync(long id, DateTime usedAt, CancellationToken ct = default) => Task.CompletedTask;
     public Task<List<Prompt>> GetAllAsync(CancellationToken ct = default) => Task.FromResult(Prompts.ToList());
     public Task<int> GetCountAsync(CancellationToken ct = default) => Task.FromResult(Prompts.Count);
+
+    public Task<List<string>> GetAllTagsAsync(CancellationToken ct = default)
+    {
+        var tags = Prompts.SelectMany(p => p.GetTags()).Distinct(StringComparer.OrdinalIgnoreCase).OrderBy(t => t).ToList();
+        return Task.FromResult(tags);
+    }
+
+    public Task<List<Prompt>> FindCandidatesAsync(string title, string body, int limit = 10, CancellationToken ct = default)
+    {
+        return Task.FromResult(Prompts.Take(limit).ToList());
+    }
 
     public Task<List<Prompt>> SearchAsync(SearchQuery query, CancellationToken ct = default)
     {

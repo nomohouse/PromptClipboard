@@ -67,4 +67,66 @@ public static class Migrations
         CREATE INDEX IF NOT EXISTS idx_prompts_use_count ON prompts(use_count DESC);
         CREATE INDEX IF NOT EXISTS idx_prompts_folder ON prompts(folder) WHERE folder != '';
     """;
+
+    /// <summary>
+    /// V003b code migration: adds body_hash column, index, and backfills existing rows.
+    /// Called from MigrationRunner via MigrationEntry.FromCode().
+    /// </summary>
+    public static void V003b_AddBodyHash(Microsoft.Data.Sqlite.SqliteConnection conn, Microsoft.Data.Sqlite.SqliteTransaction tx)
+    {
+        // DDL — idempotency guard: check if column already exists (crash-recovery safe)
+        using var checkCmd = conn.CreateCommand();
+        checkCmd.Transaction = tx;
+        checkCmd.CommandText = "SELECT COUNT(*) FROM pragma_table_info('prompts') WHERE name='body_hash'";
+        var exists = (long)checkCmd.ExecuteScalar()! > 0;
+
+        if (!exists)
+        {
+            using var ddl = conn.CreateCommand();
+            ddl.Transaction = tx;
+            ddl.CommandText = "ALTER TABLE prompts ADD COLUMN body_hash TEXT";
+            ddl.ExecuteNonQuery();
+        }
+
+        // Index — IF NOT EXISTS already idempotent
+        using var idxCmd = conn.CreateCommand();
+        idxCmd.Transaction = tx;
+        idxCmd.CommandText = "CREATE INDEX IF NOT EXISTS idx_prompts_body_hash ON prompts(body_hash) WHERE body_hash IS NOT NULL";
+        idxCmd.ExecuteNonQuery();
+
+        // Backfill — batched, idempotent (WHERE body_hash IS NULL)
+        V003b_BackfillBatched(conn, tx, batchSize: 200);
+    }
+
+    internal static void V003b_BackfillBatched(Microsoft.Data.Sqlite.SqliteConnection conn, Microsoft.Data.Sqlite.SqliteTransaction tx, int batchSize)
+    {
+        while (true)
+        {
+            // Read a batch of rows without hash
+            using var selectCmd = conn.CreateCommand();
+            selectCmd.Transaction = tx;
+            selectCmd.CommandText = "SELECT id, body FROM prompts WHERE body_hash IS NULL LIMIT @batchSize";
+            selectCmd.Parameters.AddWithValue("@batchSize", batchSize);
+
+            var batch = new List<(long Id, string Body)>();
+            using (var reader = selectCmd.ExecuteReader())
+            {
+                while (reader.Read())
+                    batch.Add((reader.GetInt64(0), reader.GetString(1)));
+            }
+
+            if (batch.Count == 0) break;
+
+            foreach (var (id, body) in batch)
+            {
+                var hash = BodyHasher.ComputeHash(body);
+                using var updateCmd = conn.CreateCommand();
+                updateCmd.Transaction = tx;
+                updateCmd.CommandText = "UPDATE prompts SET body_hash = @hash WHERE id = @id";
+                updateCmd.Parameters.AddWithValue("@hash", hash);
+                updateCmd.Parameters.AddWithValue("@id", id);
+                updateCmd.ExecuteNonQuery();
+            }
+        }
+    }
 }

@@ -5,6 +5,7 @@ using System.Windows.Threading;
 using Hardcodet.Wpf.TaskbarNotification;
 using Microsoft.Extensions.DependencyInjection;
 using PromptClipboard.App.Handlers;
+using PromptClipboard.App.Interfaces;
 using PromptClipboard.App.ViewModels;
 using PromptClipboard.App.Views;
 using PromptClipboard.Application.Services;
@@ -72,7 +73,32 @@ public partial class App : System.Windows.Application
 
             // Database
             var migrationRunner = _services.GetRequiredService<MigrationRunner>();
-            migrationRunner.RunAll();
+            try
+            {
+                migrationRunner.RunAll();
+            }
+            catch (BackupFailedException ex)
+            {
+                _log.Fatal(ex, "Database migration blocked — backup failed");
+                var errorHandler = _services.GetRequiredService<IStartupErrorHandler>();
+                errorHandler.HandleFatalError(
+                    "Prompt Clipboard — Startup Error",
+                    $"Database upgrade requires a backup, but backup failed:\n{ex.InnerException?.Message}\n\n" +
+                    "Please check disk space/permissions and restart the application.",
+                    ex);
+                return;
+            }
+            catch (IncompatibleSchemaException ex)
+            {
+                _log.Fatal(ex, "Database migration blocked — incompatible schema");
+                var errorHandler = _services.GetRequiredService<IStartupErrorHandler>();
+                errorHandler.HandleFatalError(
+                    "Prompt Clipboard — Startup Error",
+                    $"Database schema is incompatible with this version:\n{ex.Message}\n\n" +
+                    "Please restore from backup or run manual migration.",
+                    ex);
+                return;
+            }
 
             // Seed data
             await PromptSeeder.SeedIfNeededAsync(
@@ -87,6 +113,14 @@ public partial class App : System.Windows.Application
 
             var paletteVm = _services.GetRequiredService<PaletteViewModel>();
             _paletteWindow.DataContext = paletteVm;
+
+            // Wire QuickAdd sub-VM
+            var quickAdd = new QuickAddViewModel(
+                _services.GetRequiredService<IPromptRepository>(),
+                _services.GetRequiredService<ITagSuggestionRepository>(),
+                _services.GetRequiredService<IDuplicateDetectionRepository>(),
+                Log.Logger);
+            paletteVm.InitializeQuickAdd(quickAdd);
 
             // Wire events
             paletteVm.PasteRequested += OnPasteRequested;
@@ -202,6 +236,8 @@ public partial class App : System.Windows.Application
         services.AddSingleton<SqlitePromptRepository>();
         services.AddSingleton<IPromptRepository>(sp => sp.GetRequiredService<SqlitePromptRepository>());
         services.AddSingleton<IAdvancedSearchRepository>(sp => sp.GetRequiredService<SqlitePromptRepository>());
+        services.AddSingleton<ITagSuggestionRepository>(sp => sp.GetRequiredService<SqlitePromptRepository>());
+        services.AddSingleton<IDuplicateDetectionRepository>(sp => sp.GetRequiredService<SqlitePromptRepository>());
         services.AddSingleton<SearchRankingService>();
         services.AddSingleton<TemplateEngine>();
         services.AddSingleton<ImportExportUseCase>();
@@ -214,6 +250,7 @@ public partial class App : System.Windows.Application
         services.AddSingleton<IntegrityLevelChecker>();
         services.AddSingleton<IUpdateService, VelopackUpdateService>();
         services.AddSingleton<PastePromptUseCase>();
+        services.AddSingleton<IStartupErrorHandler, StartupErrorHandler>();
         services.AddSingleton<PaletteViewModel>();
     }
 

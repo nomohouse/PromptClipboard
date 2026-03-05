@@ -99,8 +99,31 @@ public partial class PaletteWindow : Window
 
     private void Window_PreviewKeyDown(object sender, KeyEventArgs e)
     {
+        var isQuickAdd = ViewModel.Mode == PaletteMode.QuickAdd;
+
         switch (e.Key)
         {
+            case Key.Down when isQuickAdd:
+            case Key.Up when isQuickAdd:
+                return; // let arrows work in multi-line Body TextBox
+
+            case Key.Down when ViewModel.ShowRevealedPrompt:
+                if (ViewModel.Prompts.Count > 0)
+                {
+                    ViewModel.SelectedIndex = 0;
+                    ViewModel.SelectedPrompt = ViewModel.Prompts[0];
+                }
+                e.Handled = true;
+                break;
+            case Key.Up when ViewModel.ShowRevealedPrompt:
+                if (ViewModel.Prompts.Count > 0)
+                {
+                    var last = ViewModel.Prompts.Count - 1;
+                    ViewModel.SelectedIndex = last;
+                    ViewModel.SelectedPrompt = ViewModel.Prompts[last];
+                }
+                e.Handled = true;
+                break;
             case Key.Down:
                 ViewModel.MoveDownCommand.Execute(null);
                 e.Handled = true;
@@ -109,25 +132,41 @@ public partial class PaletteWindow : Window
                 ViewModel.MoveUpCommand.Execute(null);
                 e.Handled = true;
                 break;
+
             case Key.Enter when Keyboard.Modifiers == ModifierKeys.Alt:
-                ViewModel.OpenEditorCommand.Execute(null);
+                if (!isQuickAdd) ViewModel.OpenEditorCommand.Execute(null);
                 e.Handled = true;
                 break;
             case Key.Enter when Keyboard.Modifiers == ModifierKeys.Control:
-                ViewModel.PasteAsTextCommand.Execute(null);
+                if (isQuickAdd)
+                    ViewModel.QuickAdd?.SaveCommand.Execute(null);
+                else
+                    ViewModel.PasteAsTextCommand.Execute(null);
                 e.Handled = true;
                 break;
-            case Key.Enter:
+            case Key.Enter when Keyboard.Modifiers == ModifierKeys.None:
+                if (isQuickAdd)
+                    return; // let Enter reach TextBox (AcceptsReturn=True)
                 ViewModel.PasteCommand.Execute(null);
                 e.Handled = true;
                 break;
+
+            case Key.S when Keyboard.Modifiers == ModifierKeys.Control:
+                if (isQuickAdd)
+                {
+                    ViewModel.QuickAdd?.SaveCommand.Execute(null);
+                    e.Handled = true;
+                }
+                break;
+
             case Key.Escape:
                 ViewModel.HandleEscapeCommand.Execute(null);
                 e.Handled = true;
                 break;
-            // P0: Ctrl+N = full editor (P2 changes handler to inline QuickAdd)
+
+            // Ctrl+N = inline QuickAdd (P2)
             case Key.N when Keyboard.Modifiers == ModifierKeys.Control:
-                ViewModel.CreateCommand.Execute(null);
+                ViewModel.EnterQuickAddCommand.Execute(null);
                 e.Handled = true;
                 break;
             // Ctrl+Alt+N = always full editor
