@@ -66,7 +66,7 @@ public partial class PaletteWindow : Window
         try
         {
             Hide();
-            ViewModel.SearchText = string.Empty;
+            ViewModel.OnPaletteHidden();
         }
         catch (Exception ex)
         {
@@ -125,6 +125,21 @@ public partial class PaletteWindow : Window
                 ViewModel.HandleEscapeCommand.Execute(null);
                 e.Handled = true;
                 break;
+            // P0: Ctrl+N = full editor (P2 changes handler to inline QuickAdd)
+            case Key.N when Keyboard.Modifiers == ModifierKeys.Control:
+                ViewModel.CreateCommand.Execute(null);
+                e.Handled = true;
+                break;
+            // Ctrl+Alt+N = always full editor
+            case Key.N when Keyboard.Modifiers == (ModifierKeys.Control | ModifierKeys.Alt):
+                ViewModel.CreateCommand.Execute(null);
+                e.Handled = true;
+                break;
+            // Ctrl+Shift+N = full editor with prefill from search DSL
+            case Key.N when Keyboard.Modifiers == (ModifierKeys.Control | ModifierKeys.Shift):
+                ViewModel.CreateWithTitleCommand.Execute(null);
+                e.Handled = true;
+                break;
         }
     }
 
@@ -135,10 +150,12 @@ public partial class PaletteWindow : Window
             if (IsButtonClick(e.OriginalSource as DependencyObject))
                 return;
 
-            _log.Debug("Card clicked: prompt={Id}", item.Prompt.Id);
+            _log.Debug("Card clicked: prompt={Id}, clicks={Count}", item.Prompt.Id, e.ClickCount);
             ViewModel.SelectedPrompt = item;
             ViewModel.SelectedIndex = ViewModel.Prompts.IndexOf(item);
-            ViewModel.PasteCommand.Execute(null);
+
+            if (e.ClickCount >= 2)
+                ViewModel.PasteCommand.Execute(null);
         }
     }
 

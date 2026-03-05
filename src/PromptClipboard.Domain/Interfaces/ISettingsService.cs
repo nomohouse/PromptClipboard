@@ -10,6 +10,11 @@ public class AppSettings
     public int PasteDelayMs { get; set; } = 50;
     public int RestoreDelayMs { get; set; } = 150;
     public DateTime? LastUpdateCheckUtc { get; set; }
+
+    // Seed metadata
+    public int SeedVersion { get; set; }
+    public List<string> SeedAppliedKeys { get; set; } = [];
+    public bool SeedBootstrapStarted { get; set; }
 }
 
 public interface ISettingsService

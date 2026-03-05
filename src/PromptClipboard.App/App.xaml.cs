@@ -75,8 +75,10 @@ public partial class App : System.Windows.Application
             migrationRunner.RunAll();
 
             // Seed data
-            await PromptSeeder.SeedIfEmptyAsync(
-                _services.GetRequiredService<IPromptRepository>(), _log);
+            await PromptSeeder.SeedIfNeededAsync(
+                _services.GetRequiredService<IPromptRepository>(),
+                _services.GetRequiredService<ISettingsService>(),
+                _log);
 
             // Palette window
             _paletteWindow = new PaletteWindow();
@@ -91,6 +93,7 @@ public partial class App : System.Windows.Application
             paletteVm.PasteAsTextRequested += OnPasteAsTextRequested;
             paletteVm.EditRequested += OnEditRequested;
             paletteVm.CreateRequested += OnCreateRequested;
+            paletteVm.CreateWithTitleRequested += OnCreateWithTitleRequested;
             paletteVm.CloseRequested += () =>
             {
                 _log?.Debug("CloseRequested fired");
@@ -279,23 +282,38 @@ public partial class App : System.Windows.Application
         ShowPalette();
     }
 
+    private bool _isShowingPalette;
+
     private async void ShowPalette()
     {
         if (_paletteWindow == null) return;
-
+        if (_isShowingPalette) return;
+        _isShowingPalette = true;
         try
         {
             var focusTracker = _services!.GetRequiredService<IFocusTracker>();
             _paletteWindow.ViewModel.HasTarget = focusTracker.SavedHwnd != IntPtr.Zero;
             _log?.Debug("ShowPalette: hasTarget={HasTarget}", _paletteWindow.ViewModel.HasTarget);
 
+            // Stage: load data BEFORE showing window for correct empty state
+            var countTask = _paletteWindow.ViewModel.RefreshTotalCountAsync();
+            var loadTask = _paletteWindow.ViewModel.LoadPromptsAsync();
+            await Task.WhenAll(countTask, loadTask);
+
+            // Show: data is already loaded, empty state is correct
             _paletteWindow.ShowAndFocus();
-            await _paletteWindow.ViewModel.LoadPromptsAsync();
             _log?.Debug("ShowPalette: loaded {Count} prompts", _paletteWindow.ViewModel.Prompts.Count);
         }
         catch (Exception ex)
         {
             _log?.Error(ex, "ShowPalette failed");
+            _paletteWindow.ViewModel.SetTransientLoadError(
+                "Couldn't load prompts. Check database file/permissions and try again.");
+            _paletteWindow.ShowAndFocus();
+        }
+        finally
+        {
+            _isShowingPalette = false;
         }
     }
 
@@ -356,12 +374,49 @@ public partial class App : System.Windows.Application
                 _paletteWindow.SuppressDeactivate(false);
             }
 
+            await _paletteWindow.ViewModel.RefreshTotalCountAsync();
             await _paletteWindow.ViewModel.LoadPromptsAsync();
             _paletteWindow.Activate();
         }
         catch (Exception ex)
         {
             _log?.Error(ex, "OnCreateRequested failed");
+        }
+    }
+
+    private async void OnCreateWithTitleRequested(string title, string? tag, string? lang)
+    {
+        _log?.Information("OnCreateWithTitleRequested: title='{Title}', tag='{Tag}', lang='{Lang}'", title, tag, lang);
+        if (_services == null || _paletteWindow == null) return;
+
+        try
+        {
+            _paletteWindow.SuppressDeactivate(true);
+            try
+            {
+                var vm = new EditorViewModel(_services.GetRequiredService<IPromptRepository>());
+                vm.LoadForCreate();
+                vm.Title = title;
+                if (tag != null) vm.TagsInput = tag;
+                if (lang != null) vm.Lang = lang;
+                var editor = new EditorWindow();
+                editor.Initialize(vm);
+                editor.Owner = _paletteWindow;
+                editor.ShowDialog();
+                _log?.Debug("CreateWithTitle editor closed");
+            }
+            finally
+            {
+                _paletteWindow.SuppressDeactivate(false);
+            }
+
+            await _paletteWindow.ViewModel.RefreshTotalCountAsync();
+            await _paletteWindow.ViewModel.LoadPromptsAsync();
+            _paletteWindow.Activate();
+        }
+        catch (Exception ex)
+        {
+            _log?.Error(ex, "OnCreateWithTitleRequested failed");
         }
     }
 
@@ -429,6 +484,7 @@ public partial class App : System.Windows.Application
             var repo = _services.GetRequiredService<IPromptRepository>();
             await repo.DeleteAsync(prompt.Id);
             _log?.Information("Prompt {Id} deleted", prompt.Id);
+            await _paletteWindow.ViewModel.RefreshTotalCountAsync();
             await _paletteWindow.ViewModel.LoadPromptsAsync();
             _paletteWindow.Activate();
         }

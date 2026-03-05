@@ -1,5 +1,6 @@
 namespace PromptClipboard.App.Tests.Fakes;
 
+using PromptClipboard.Domain;
 using PromptClipboard.Domain.Entities;
 using PromptClipboard.Domain.Interfaces;
 
@@ -15,7 +16,7 @@ internal class FakePromptRepository : IPromptRepository
         var results = Prompts.Where(p => string.IsNullOrEmpty(query) || p.Title.Contains(query, StringComparison.OrdinalIgnoreCase) || p.Body.Contains(query, StringComparison.OrdinalIgnoreCase)).ToList();
         if (!string.IsNullOrEmpty(tagFilter))
             results = results.Where(p => p.TagsText.Contains(tagFilter, StringComparison.OrdinalIgnoreCase)).ToList();
-        return Task.FromResult(results);
+        return Task.FromResult(results.Take(SearchDefaults.MaxResults + 1).ToList());
     }
 
     public Task<List<Prompt>> GetPinnedAsync(CancellationToken ct = default)
@@ -25,11 +26,27 @@ internal class FakePromptRepository : IPromptRepository
         return Task.FromResult(Prompts.Where(p => p.IsPinned).ToList());
     }
 
-    public Task<List<Prompt>> GetRecentAsync(int limit = 10, CancellationToken ct = default)
+    public Task<List<Prompt>> GetPinnedAsync(int limit, CancellationToken ct = default)
     {
         ct.ThrowIfCancellationRequested();
         if (ThrowOnSearch) throw new InvalidOperationException("Simulated error");
-        return Task.FromResult(Prompts.OrderByDescending(p => p.LastUsedAt ?? p.CreatedAt).Take(limit).ToList());
+        return Task.FromResult(Prompts
+            .Where(p => p.IsPinned)
+            .OrderByDescending(p => p.LastUsedAt ?? p.CreatedAt)
+            .ThenByDescending(p => p.Id)
+            .Take(limit + 1)
+            .ToList());
+    }
+
+    public Task<List<Prompt>> GetRecentAsync(int limit = SearchDefaults.RecentSliceLimit, CancellationToken ct = default)
+    {
+        ct.ThrowIfCancellationRequested();
+        if (ThrowOnSearch) throw new InvalidOperationException("Simulated error");
+        return Task.FromResult(Prompts
+            .Where(p => p.LastUsedAt.HasValue)
+            .OrderByDescending(p => p.LastUsedAt)
+            .Take(limit)
+            .ToList());
     }
 
     public Task<Prompt?> GetByIdAsync(long id, CancellationToken ct = default) =>

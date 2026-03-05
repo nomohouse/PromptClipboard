@@ -1,5 +1,6 @@
 namespace PromptClipboard.Application.Tests.Fakes;
 
+using PromptClipboard.Domain;
 using PromptClipboard.Domain.Entities;
 using PromptClipboard.Domain.Interfaces;
 
@@ -8,6 +9,7 @@ internal sealed class FakePromptRepository : IPromptRepository
     private long _nextId = 1;
     public List<Prompt> Prompts { get; set; } = [];
     public long? LastMarkedUsedId { get; private set; }
+    public int? LastRecentLimitRequested { get; private set; }
 
     public Task<List<Prompt>> SearchAsync(string query, string? tagFilter = null, string? langFilter = null, CancellationToken ct = default)
     {
@@ -19,14 +21,29 @@ internal sealed class FakePromptRepository : IPromptRepository
         if (!string.IsNullOrEmpty(tagFilter))
             results = results.Where(p => p.TagsText.Contains(tagFilter, StringComparison.OrdinalIgnoreCase)).ToList();
 
-        return Task.FromResult(results);
+        return Task.FromResult(results.Take(SearchDefaults.MaxResults + 1).ToList());
     }
 
     public Task<List<Prompt>> GetPinnedAsync(CancellationToken ct = default) =>
         Task.FromResult(Prompts.Where(p => p.IsPinned).ToList());
 
-    public Task<List<Prompt>> GetRecentAsync(int limit = 10, CancellationToken ct = default) =>
-        Task.FromResult(Prompts.OrderByDescending(p => p.LastUsedAt ?? p.CreatedAt).Take(limit).ToList());
+    public Task<List<Prompt>> GetPinnedAsync(int limit, CancellationToken ct = default) =>
+        Task.FromResult(Prompts
+            .Where(p => p.IsPinned)
+            .OrderByDescending(p => p.LastUsedAt ?? p.CreatedAt)
+            .ThenByDescending(p => p.Id)
+            .Take(limit + 1)
+            .ToList());
+
+    public Task<List<Prompt>> GetRecentAsync(int limit = SearchDefaults.RecentSliceLimit, CancellationToken ct = default)
+    {
+        LastRecentLimitRequested = limit;
+        return Task.FromResult(Prompts
+            .Where(p => p.LastUsedAt.HasValue)
+            .OrderByDescending(p => p.LastUsedAt)
+            .Take(limit)
+            .ToList());
+    }
 
     public Task<Prompt?> GetByIdAsync(long id, CancellationToken ct = default) =>
         Task.FromResult(Prompts.FirstOrDefault(p => p.Id == id));

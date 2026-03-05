@@ -13,6 +13,7 @@ public static class Converters
     public static IValueConverter TagsNotEmptyConverter { get; } = new TagsNotEmptyConverterImpl();
     public static IValueConverter BoolToPinColorConverter { get; } = new BoolToPinColorConverterImpl();
     public static IValueConverter StringEmptyToVisibleConverter { get; } = new StringEmptyToVisibleConverterImpl();
+    public static IValueConverter StringNotEmptyToVisibleConverter { get; } = new StringNotEmptyToVisibleConverterImpl();
     public static IValueConverter InverseBoolToVisibilityConverter { get; } = new InverseBoolToVisibilityConverterImpl();
     public static IValueConverter BoolToVisibilityConverter { get; } = new BoolToVisibilityConverterImpl();
 
@@ -79,6 +80,15 @@ public static class Converters
     {
         public object Convert(object value, Type targetType, object parameter, CultureInfo culture)
             => string.IsNullOrEmpty(value as string) ? Visibility.Visible : Visibility.Collapsed;
+
+        public object ConvertBack(object value, Type targetType, object parameter, CultureInfo culture)
+            => throw new NotImplementedException();
+    }
+
+    private sealed class StringNotEmptyToVisibleConverterImpl : IValueConverter
+    {
+        public object Convert(object value, Type targetType, object parameter, CultureInfo culture)
+            => !string.IsNullOrEmpty(value as string) ? Visibility.Visible : Visibility.Collapsed;
 
         public object ConvertBack(object value, Type targetType, object parameter, CultureInfo culture)
             => throw new NotImplementedException();

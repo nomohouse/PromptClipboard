@@ -38,6 +38,7 @@
                 <RowDefinition Height="Auto"/>
                 <RowDefinition Height="Auto"/>
                 <RowDefinition Height="Auto"/>
+                <RowDefinition Height="Auto"/>
                 <RowDefinition Height="*"/>
             </Grid.RowDefinitions>
 
@@ -83,6 +84,7 @@
                     <ColumnDefinition Width="Auto"/>
                     <ColumnDefinition Width="*"/>
                     <ColumnDefinition Width="Auto"/>
+                    <ColumnDefinition Width="Auto"/>
                 </Grid.ColumnDefinitions>
                 <TextBlock Grid.Column="0" Text="&#xE721;" FontFamily="Segoe MDL2 Assets"
                           Foreground="{StaticResource TextDimBrush}" VerticalAlignment="Center" Margin="0,0,8,0" FontSize="16"/>
@@ -91,17 +93,42 @@
                             Text="{Binding SearchText, UpdateSourceTrigger=PropertyChanged}"
                             Background="Transparent" Foreground="{StaticResource TextBrush}"
                             BorderThickness="0" FontSize="14" VerticalAlignment="Center"
-                            CaretBrush="{StaticResource AccentBrush}"/>
+                            CaretBrush="{StaticResource AccentBrush}"
+                            AutomationProperties.Name="Search prompts"/>
                     <TextBlock Text="Search prompts... (#tag, lang:en)"
                               Foreground="{StaticResource TextDimBrush}" FontSize="14"
                               VerticalAlignment="Center" IsHitTestVisible="False" Margin="2,0,0,0"
                               Visibility="{Binding SearchText, Converter={x:Static local:Converters.StringEmptyToVisibleConverter}}"/>
                 </Grid>
-                <Button Grid.Column="2" Content="+ New"
+                <!-- Clear search button -->
+                <Button Grid.Column="2" Content="&#xE711;" FontFamily="Segoe MDL2 Assets"
+                       FontSize="10" Foreground="{StaticResource TextDimBrush}" Background="Transparent"
+                       BorderThickness="0" Cursor="Hand" Padding="6,6" Margin="4,0,0,0"
+                       Command="{Binding ClearSearchCommand}"
+                       Visibility="{Binding SearchText, Converter={x:Static local:Converters.StringNotEmptyToVisibleConverter}}"
+                       ToolTip="Clear search" AutomationProperties.Name="Clear search"
+                       TabIndex="1">
+                    <Button.Template>
+                        <ControlTemplate TargetType="Button">
+                            <Border x:Name="ClearBorder" Background="Transparent" CornerRadius="4"
+                                    Padding="{TemplateBinding Padding}">
+                                <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                            </Border>
+                            <ControlTemplate.Triggers>
+                                <Trigger Property="IsMouseOver" Value="True">
+                                    <Setter TargetName="ClearBorder" Property="Background" Value="#2a2b4a"/>
+                                </Trigger>
+                            </ControlTemplate.Triggers>
+                        </ControlTemplate>
+                    </Button.Template>
+                </Button>
+                <Button Grid.Column="3" Content="+ New"
                        Command="{Binding CreateCommand}"
                        Background="{StaticResource AccentBrush}" Foreground="White"
                        BorderThickness="0" Padding="12,6" Margin="8,0,0,0"
-                       FontSize="12" Cursor="Hand">
+                       FontSize="12" Cursor="Hand"
+                       AutomationProperties.Name="Create new prompt"
+                       TabIndex="2">
                     <Button.Template>
                         <ControlTemplate TargetType="Button">
                             <Border Background="{TemplateBinding Background}" CornerRadius="16" Padding="{TemplateBinding Padding}">
@@ -116,7 +143,7 @@
             <WrapPanel Grid.Row="2" Margin="16,0,16,8">
                 <Border Background="{StaticResource CardBrush}" CornerRadius="4" Padding="6,2" Margin="0,0,6,0">
                     <TextBlock Foreground="{StaticResource TextDimBrush}" FontSize="11">
-                        <Run FontWeight="Bold" Foreground="{StaticResource TextBrush}">Enter</Run>
+                        <Run FontWeight="Bold" Foreground="{StaticResource TextBrush}">DblClick/Enter</Run>
                         <Run Text=" paste"/>
                     </TextBlock>
                 </Border>
@@ -128,15 +155,21 @@
                 </Border>
                 <Border Background="{StaticResource CardBrush}" CornerRadius="4" Padding="6,2" Margin="0,0,6,0">
                     <TextBlock Foreground="{StaticResource TextDimBrush}" FontSize="11">
-                        <Run FontWeight="Bold" Foreground="{StaticResource TextBrush}">Alt+Enter</Run>
-                        <Run Text=" editor"/>
+                        <Run FontWeight="Bold" Foreground="{StaticResource TextBrush}">Ctrl+N</Run>
+                        <Run Text=" new"/>
                     </TextBlock>
                 </Border>
                 <Border Background="{StaticResource CardBrush}" CornerRadius="4" Padding="6,2" Margin="0,0,6,0">
                     <TextBlock Foreground="{StaticResource TextDimBrush}" FontSize="11">
                         <Run FontWeight="Bold" Foreground="{StaticResource TextBrush}">Esc</Run>
-                        <Run Text=" clear"/>
+                        <Run Text=" clear/close"/>
                     </TextBlock>
+                </Border>
+                <!-- Syntax help icon -->
+                <Border Background="{StaticResource CardBrush}" CornerRadius="4" Padding="6,2" Margin="0,0,6,0"
+                       ToolTip="Search syntax:&#x0a;#tag — filter by tag&#x0a;lang:en — filter by language&#x0a;Esc — clear search, then close"
+                       Cursor="Help">
+                    <TextBlock Text="?" Foreground="{StaticResource AccentBrush}" FontSize="11" FontWeight="Bold"/>
                 </Border>
             </WrapPanel>
 
@@ -147,8 +180,91 @@
                           Foreground="#fca5a5" FontSize="12"/>
             </Border>
 
+            <!-- Result count -->
+            <TextBlock Grid.Row="4" Text="{Binding ResultCountText}" Foreground="{StaticResource TextDimBrush}"
+                      FontSize="11" Margin="16,0,16,4"
+                      Visibility="{Binding ResultCountText, Converter={x:Static local:Converters.StringNotEmptyToVisibleConverter}}"
+                      AutomationProperties.Name="Result count"/>
+
+            <!-- Empty Database State -->
+            <StackPanel Grid.Row="5" VerticalAlignment="Center" HorizontalAlignment="Center" Margin="16,40,16,16"
+                       Visibility="{Binding ShowEmptyDatabase, Converter={x:Static local:Converters.BoolToVisibilityConverter}}">
+                <TextBlock Text="No prompts yet" Foreground="{StaticResource TextBrush}" FontSize="16" FontWeight="SemiBold"
+                          HorizontalAlignment="Center" Margin="0,0,0,8"/>
+                <TextBlock Text="Create your first prompt with Ctrl+N" Foreground="{StaticResource TextDimBrush}" FontSize="13"
+                          HorizontalAlignment="Center" Margin="0,0,0,12"/>
+                <Button Content="+ Create prompt" Command="{Binding CreateCommand}"
+                       Background="{StaticResource AccentBrush}" Foreground="White"
+                       BorderThickness="0" Padding="16,8" Cursor="Hand" FontSize="13"
+                       HorizontalAlignment="Center"
+                       AutomationProperties.Name="Create first prompt">
+                    <Button.Template>
+                        <ControlTemplate TargetType="Button">
+                            <Border Background="{TemplateBinding Background}" CornerRadius="16" Padding="{TemplateBinding Padding}">
+                                <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                            </Border>
+                        </ControlTemplate>
+                    </Button.Template>
+                </Button>
+            </StackPanel>
+
+            <!-- No Results State -->
+            <StackPanel Grid.Row="5" VerticalAlignment="Center" HorizontalAlignment="Center" Margin="16,40,16,16"
+                       Visibility="{Binding ShowNoResults, Converter={x:Static local:Converters.BoolToVisibilityConverter}}">
+                <TextBlock Text="Nothing found" Foreground="{StaticResource TextBrush}" FontSize="16" FontWeight="SemiBold"
+                          HorizontalAlignment="Center" Margin="0,0,0,8"/>
+                <TextBlock Text="Try a different search or create a new prompt" Foreground="{StaticResource TextDimBrush}" FontSize="13"
+                          HorizontalAlignment="Center" Margin="0,0,0,12"/>
+                <Button Content="+ Create from search" Command="{Binding CreateWithTitleCommand}"
+                       Background="{StaticResource AccentBrush}" Foreground="White"
+                       BorderThickness="0" Padding="16,8" Cursor="Hand" FontSize="13"
+                       HorizontalAlignment="Center"
+                       AutomationProperties.Name="Create prompt from search text">
+                    <Button.Template>
+                        <ControlTemplate TargetType="Button">
+                            <Border Background="{TemplateBinding Background}" CornerRadius="16" Padding="{TemplateBinding Padding}">
+                                <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                            </Border>
+                        </ControlTemplate>
+                    </Button.Template>
+                </Button>
+            </StackPanel>
+
+            <!-- Load Error State -->
+            <StackPanel Grid.Row="5" VerticalAlignment="Center" HorizontalAlignment="Center" Margin="16,40,16,16"
+                       Visibility="{Binding ShowLoadError, Converter={x:Static local:Converters.BoolToVisibilityConverter}}">
+                <TextBlock Text="{Binding TransientLoadError}" Foreground="#fca5a5" FontSize="13"
+                          HorizontalAlignment="Center" Margin="0,0,0,12" TextWrapping="Wrap"/>
+                <StackPanel Orientation="Horizontal" HorizontalAlignment="Center">
+                    <Button Content="Retry" Command="{Binding RetryLoadCommand}"
+                           Background="{StaticResource AccentBrush}" Foreground="White"
+                           BorderThickness="0" Padding="12,6" Cursor="Hand" FontSize="12" Margin="0,0,8,0"
+                           AutomationProperties.Name="Retry loading prompts">
+                        <Button.Template>
+                            <ControlTemplate TargetType="Button">
+                                <Border Background="{TemplateBinding Background}" CornerRadius="16" Padding="{TemplateBinding Padding}">
+                                    <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                </Border>
+                            </ControlTemplate>
+                        </Button.Template>
+                    </Button>
+                    <Button Content="Dismiss" Command="{Binding DismissErrorCommand}"
+                           Background="{StaticResource CardBrush}" Foreground="{StaticResource TextDimBrush}"
+                           BorderThickness="0" Padding="12,6" Cursor="Hand" FontSize="12"
+                           AutomationProperties.Name="Dismiss error">
+                        <Button.Template>
+                            <ControlTemplate TargetType="Button">
+                                <Border Background="{TemplateBinding Background}" CornerRadius="16" Padding="{TemplateBinding Padding}">
+                                    <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                </Border>
+                            </ControlTemplate>
+                        </Button.Template>
+                    </Button>
+                </StackPanel>
+            </StackPanel>
+
             <!-- Prompt List -->
-            <ListBox x:Name="PromptListBox" Grid.Row="4" Margin="16,0,16,16"
+            <ListBox x:Name="PromptListBox" Grid.Row="5" Margin="16,0,16,16"
                      ItemsSource="{Binding Prompts}"
                      SelectedItem="{Binding SelectedPrompt, Mode=TwoWay}"
                      SelectedIndex="{Binding SelectedIndex, Mode=TwoWay}"

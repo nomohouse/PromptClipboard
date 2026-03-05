@@ -3,6 +3,7 @@ namespace PromptClipboard.App.Tests;
 using PromptClipboard.App.Tests.Fakes;
 using PromptClipboard.App.ViewModels;
 using PromptClipboard.Application.Services;
+using PromptClipboard.Domain;
 using PromptClipboard.Domain.Entities;
 using Serilog;
 using Serilog.Events;
@@ -143,5 +144,212 @@ public class PaletteViewModelTests
         await _vm.LoadPromptsAsync();
 
         Assert.False(_vm.Prompts[0].IsExpanded);
+    }
+
+    [Fact]
+    public void ParseQuery_IsAccessibleFromApp()
+    {
+        // Verify public access from App layer
+        var (query, tag, lang) = SearchRankingService.ParseQuery("#email lang:en hello");
+        Assert.Equal("hello", query);
+        Assert.Equal("email", tag);
+        Assert.Equal("en", lang);
+    }
+
+    [Fact]
+    public void OnPaletteHidden_PreservesSearchText()
+    {
+        _vm.SearchText = "my query";
+        _vm.OnPaletteHidden();
+        Assert.Equal("my query", _vm.SearchText);
+    }
+
+    [Fact]
+    public void ClearSearch_ResetsSearchText()
+    {
+        _vm.SearchText = "some text";
+        _vm.ClearSearchCommand.Execute(null);
+        Assert.Equal(string.Empty, _vm.SearchText);
+    }
+
+    [Fact]
+    public async Task EmptyDb_ShowsEmptyDatabase()
+    {
+        // No prompts in repo, totalCount=0
+        await _vm.RefreshTotalCountAsync();
+        await _vm.LoadPromptsAsync();
+        Assert.True(_vm.ShowEmptyDatabase);
+        Assert.False(_vm.ShowNoResults);
+    }
+
+    [Fact]
+    public async Task SearchNoResults_ShowsNoResults()
+    {
+        // Add prompts so totalCount > 0, but search returns nothing
+        _repo.Prompts.Add(new Prompt { Id = 1, Title = "Alpha", Body = "Body" });
+        await _vm.RefreshTotalCountAsync();
+        // Search for something that won't match
+        await _vm.LoadPromptsAsync("zzzznonexistent");
+        Assert.False(_vm.ShowEmptyDatabase);
+        Assert.True(_vm.ShowNoResults);
+    }
+
+    [Fact]
+    public async Task LoadPrompts_RestoresSelectionById_WhenQueryUnchanged()
+    {
+        _repo.Prompts.Add(new Prompt { Id = 1, Title = "A", Body = "a" });
+        _repo.Prompts.Add(new Prompt { Id = 2, Title = "B", Body = "b" });
+        _repo.Prompts.Add(new Prompt { Id = 3, Title = "C", Body = "c" });
+        await _vm.LoadPromptsAsync();
+
+        // Select the second item
+        _vm.SelectedIndex = 1;
+        _vm.SelectedPrompt = _vm.Prompts[1];
+        Assert.Equal(2, _vm.SelectedPrompt.Prompt.Id);
+
+        // Reload with same (empty) query
+        await _vm.LoadPromptsAsync();
+        Assert.Equal(2, _vm.SelectedPrompt!.Prompt.Id);
+    }
+
+    [Fact]
+    public async Task LoadPrompts_FallbackToFirst_WhenQueryChanged()
+    {
+        _repo.Prompts.Add(new Prompt { Id = 1, Title = "Alpha", Body = "alpha content" });
+        _repo.Prompts.Add(new Prompt { Id = 2, Title = "Beta", Body = "beta content" });
+        await _vm.LoadPromptsAsync();
+
+        // Select second
+        _vm.SelectedIndex = 1;
+        _vm.SelectedPrompt = _vm.Prompts[1];
+
+        // Load with different query — should reset to first
+        await _vm.LoadPromptsAsync("Alpha");
+        Assert.Equal(0, _vm.SelectedIndex);
+    }
+
+    [Fact]
+    public async Task LoadPrompts_FallbackToFirst_WhenIdNotFound()
+    {
+        _repo.Prompts.Add(new Prompt { Id = 1, Title = "A", Body = "a" });
+        _repo.Prompts.Add(new Prompt { Id = 2, Title = "B", Body = "b" });
+        await _vm.LoadPromptsAsync();
+        _vm.SelectedIndex = 1;
+        _vm.SelectedPrompt = _vm.Prompts[1];
+
+        // Remove the selected prompt and reload
+        _repo.Prompts.RemoveAll(p => p.Id == 2);
+        await _vm.LoadPromptsAsync();
+        Assert.Equal(0, _vm.SelectedIndex);
+        Assert.Equal(1, _vm.SelectedPrompt!.Prompt.Id);
+    }
+
+    [Fact]
+    public async Task ResultCountText_WhenHasMore_ShowsPlus()
+    {
+        // Add MaxResults+5 prompts to trigger HasMore
+        for (int i = 1; i <= SearchDefaults.MaxResults + 5; i++)
+            _repo.Prompts.Add(new Prompt { Id = i, Title = $"P{i}", Body = $"Body{i}" });
+
+        await _vm.LoadPromptsAsync("P"); // search with a query to use non-default path
+        Assert.Contains("+", _vm.ResultCountText);
+    }
+
+    [Fact]
+    public async Task ResultCountText_WhenBelowLimit_ShowsExact()
+    {
+        _repo.Prompts.Add(new Prompt { Id = 1, Title = "A", Body = "a", LastUsedAt = DateTime.UtcNow });
+        _repo.Prompts.Add(new Prompt { Id = 2, Title = "B", Body = "b", LastUsedAt = DateTime.UtcNow });
+        await _vm.LoadPromptsAsync("A");
+        Assert.Equal("Showing 1", _vm.ResultCountText);
+    }
+
+    [Fact]
+    public void CreateWithTitle_ParsesDslTokens()
+    {
+        string? receivedTitle = null;
+        string? receivedTag = null;
+        string? receivedLang = null;
+        _vm.CreateWithTitleRequested += (t, tag, lang) =>
+        {
+            receivedTitle = t;
+            receivedTag = tag;
+            receivedLang = lang;
+        };
+        _vm.SearchText = "#email lang:en hello world";
+        _vm.CreateWithTitleCommand.Execute(null);
+
+        Assert.Equal("hello world", receivedTitle);
+        Assert.Equal("email", receivedTag);
+        Assert.Equal("en", receivedLang);
+    }
+
+    [Fact]
+    public async Task CollectionChanged_UpdatesComputedProperties()
+    {
+        var changedProps = new List<string>();
+        _vm.PropertyChanged += (_, e) => { if (e.PropertyName != null) changedProps.Add(e.PropertyName); };
+
+        _repo.Prompts.Add(new Prompt { Id = 1, Title = "A", Body = "a" });
+        await _vm.LoadPromptsAsync();
+
+        Assert.Contains("ResultCount", changedProps);
+        Assert.Contains("ResultCountText", changedProps);
+        Assert.Contains("ShowEmptyDatabase", changedProps);
+        Assert.Contains("ShowNoResults", changedProps);
+    }
+
+    [Fact]
+    public void HandleEscape_ClearsSearch_ThenCloses()
+    {
+        var closeFired = false;
+        _vm.CloseRequested += () => closeFired = true;
+
+        // First Esc: clear search
+        _vm.SearchText = "query";
+        _vm.HandleEscapeCommand.Execute(null);
+        Assert.Equal(string.Empty, _vm.SearchText);
+        Assert.False(closeFired);
+
+        // Second Esc: close
+        _vm.HandleEscapeCommand.Execute(null);
+        Assert.True(closeFired);
+    }
+
+    [Fact]
+    public async Task LoadPrompts_CaseChange_PreservesSelection()
+    {
+        _repo.Prompts.Add(new Prompt { Id = 1, Title = "Test", Body = "test body" });
+        _repo.Prompts.Add(new Prompt { Id = 2, Title = "Other", Body = "other body" });
+        await _vm.LoadPromptsAsync("Test");
+        _vm.SelectedIndex = 0;
+        _vm.SelectedPrompt = _vm.Prompts[0];
+
+        // "test" with different case is same compare key
+        await _vm.LoadPromptsAsync("test");
+        Assert.Equal(1, _vm.SelectedPrompt!.Prompt.Id);
+    }
+
+    [Fact]
+    public void ShowPalette_LoadFailure_ShowsErrorState()
+    {
+        _repo.ThrowOnSearch = true;
+        _vm.SetTransientLoadError("Couldn't load prompts.");
+        Assert.True(_vm.ShowLoadError);
+        Assert.Equal("Couldn't load prompts.", _vm.TransientLoadError);
+    }
+
+    [Fact]
+    public async Task ShowPalette_LoadRecovery_ClearsTransientLoadError()
+    {
+        _vm.SetTransientLoadError("Error occurred");
+        Assert.True(_vm.ShowLoadError);
+
+        // Successful load should clear error
+        _repo.Prompts.Add(new Prompt { Id = 1, Title = "A", Body = "a" });
+        await _vm.LoadPromptsAsync();
+
+        Assert.False(_vm.ShowLoadError);
+        Assert.Null(_vm.TransientLoadError);
     }
 }

@@ -1,6 +1,7 @@
 namespace PromptClipboard.Infrastructure.Persistence;
 
 using Microsoft.Data.Sqlite;
+using PromptClipboard.Domain;
 using PromptClipboard.Domain.Entities;
 using PromptClipboard.Domain.Interfaces;
 
@@ -13,6 +14,9 @@ public sealed class SqlitePromptRepository : IPromptRepository
         _factory = factory;
     }
 
+    /// <summary>
+    /// Returns up to SearchDefaults.MaxResults + 1 items; caller uses extra item to detect HasMore.
+    /// </summary>
     public async Task<List<Prompt>> SearchAsync(string query, string? tagFilter = null, string? langFilter = null, CancellationToken ct = default)
     {
         using var conn = _factory.CreateConnection();
@@ -33,7 +37,7 @@ public sealed class SqlitePromptRepository : IPromptRepository
                 sql += " AND EXISTS (SELECT 1 FROM json_each(p.tags_json) WHERE LOWER(json_each.value) = LOWER(@tag))";
             if (hasLang)
                 sql += " AND p.lang = @lang";
-            sql += " ORDER BY bm25(prompts_fts, 10.0, 5.0, 1.0), p.is_pinned DESC, p.use_count DESC LIMIT 50";
+            sql += " ORDER BY bm25(prompts_fts, 10.0, 5.0, 1.0), p.is_pinned DESC, p.use_count DESC LIMIT @limit";
         }
         else
         {
@@ -42,11 +46,12 @@ public sealed class SqlitePromptRepository : IPromptRepository
                 sql += " AND EXISTS (SELECT 1 FROM json_each(p.tags_json) WHERE LOWER(json_each.value) = LOWER(@tag))";
             if (hasLang)
                 sql += " AND p.lang = @lang";
-            sql += " ORDER BY p.is_pinned DESC, COALESCE(p.last_used_at, p.created_at) DESC, p.use_count DESC LIMIT 50";
+            sql += " ORDER BY p.is_pinned DESC, COALESCE(p.last_used_at, p.created_at) DESC, p.use_count DESC LIMIT @limit";
         }
 
         using var cmd = conn.CreateCommand();
         cmd.CommandText = sql;
+        cmd.Parameters.AddWithValue("@limit", SearchDefaults.MaxResults + 1);
         if (hasQuery) cmd.Parameters.AddWithValue("@query", SanitizeFtsQuery(query));
         if (hasTag) cmd.Parameters.AddWithValue("@tag", tagFilter!.ToLowerInvariant());
         if (hasLang) cmd.Parameters.AddWithValue("@lang", langFilter!);
@@ -62,11 +67,26 @@ public sealed class SqlitePromptRepository : IPromptRepository
         return await ReadPromptsAsync(cmd, ct);
     }
 
-    public async Task<List<Prompt>> GetRecentAsync(int limit = 10, CancellationToken ct = default)
+    /// <summary>
+    /// Returns pinned prompts sorted by newest-first, with internal LIMIT (limit+1) sentinel for overflow detection.
+    /// </summary>
+    public async Task<List<Prompt>> GetPinnedAsync(int limit, CancellationToken ct = default)
     {
         using var conn = _factory.CreateConnection();
         using var cmd = conn.CreateCommand();
-        cmd.CommandText = "SELECT * FROM prompts ORDER BY COALESCE(last_used_at, created_at) DESC LIMIT @limit";
+        cmd.CommandText = "SELECT * FROM prompts WHERE is_pinned = 1 ORDER BY COALESCE(last_used_at, created_at) DESC, id DESC LIMIT @limit";
+        cmd.Parameters.AddWithValue("@limit", limit + 1);
+        return await ReadPromptsAsync(cmd, ct);
+    }
+
+    /// <summary>
+    /// Strict recent: only prompts with non-null last_used_at, ordered by last_used_at DESC.
+    /// </summary>
+    public async Task<List<Prompt>> GetRecentAsync(int limit = SearchDefaults.RecentSliceLimit, CancellationToken ct = default)
+    {
+        using var conn = _factory.CreateConnection();
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText = "SELECT * FROM prompts WHERE last_used_at IS NOT NULL ORDER BY last_used_at DESC LIMIT @limit";
         cmd.Parameters.AddWithValue("@limit", limit);
         return await ReadPromptsAsync(cmd, ct);
     }

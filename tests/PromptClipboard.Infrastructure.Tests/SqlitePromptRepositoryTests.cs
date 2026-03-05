@@ -1,6 +1,7 @@
 namespace PromptClipboard.Infrastructure.Tests;
 
 using Microsoft.Data.Sqlite;
+using PromptClipboard.Domain;
 using PromptClipboard.Domain.Entities;
 using PromptClipboard.Infrastructure.Persistence;
 using Serilog;
@@ -62,6 +63,23 @@ public class SqlitePromptRepositoryTests : IDisposable
         var results = await _repo.SearchAsync("email");
         Assert.Single(results);
         Assert.Equal("Email template", results[0].Title);
+    }
+
+    [Fact]
+    public async Task Search_UsesCanonicalMaxResultsPlusOneLimit()
+    {
+        for (var i = 0; i < SearchDefaults.MaxResults + 5; i++)
+        {
+            var prompt = new Prompt { Title = $"Email template {i}", Body = "email body" };
+            prompt.SetTags(["email"]);
+            await _repo.CreateAsync(prompt);
+        }
+
+        var results = await _repo.SearchAsync("email");
+
+        // Repo returns at most MaxResults+1 for HasMore detection by caller
+        Assert.True(results.Count <= SearchDefaults.MaxResults + 1);
+        Assert.True(results.Count > 0);
     }
 
     [Fact]
@@ -171,9 +189,55 @@ public class SqlitePromptRepositoryTests : IDisposable
         var id2 = await _repo.CreateAsync(p2);
         await _repo.MarkUsedAsync(id2, DateTime.UtcNow);
 
-        var results = await _repo.GetRecentAsync(10);
-        Assert.Equal(2, results.Count);
+        // Also create a never-used prompt — should NOT appear in strict recent
+        var p3 = new Prompt { Title = "NeverUsed", Body = "B" };
+        await _repo.CreateAsync(p3);
+
+        var results = await _repo.GetRecentAsync(SearchDefaults.RecentSliceLimit);
+        Assert.Equal(2, results.Count); // Only used prompts
         Assert.Equal("New", results[0].Title); // Most recent first
+        Assert.DoesNotContain(results, r => r.Title == "NeverUsed");
+    }
+
+    [Fact]
+    public async Task GetRecentAsync_ExcludesNullLastUsed()
+    {
+        // Create prompt without marking used (LastUsedAt stays null)
+        var p1 = new Prompt { Title = "NeverUsed", Body = "B" };
+        await _repo.CreateAsync(p1);
+
+        var p2 = new Prompt { Title = "Used", Body = "B" };
+        var id2 = await _repo.CreateAsync(p2);
+        await _repo.MarkUsedAsync(id2, DateTime.UtcNow);
+
+        var results = await _repo.GetRecentAsync();
+        Assert.Single(results);
+        Assert.Equal("Used", results[0].Title);
+    }
+
+    [Fact]
+    public async Task GetPinnedAsync_WithLimit_ReturnsAtMostLimitPlusOne()
+    {
+        // Create more than limit pinned prompts
+        for (int i = 0; i < 5; i++)
+        {
+            var p = new Prompt { Title = $"Pinned{i}", Body = "B", IsPinned = true };
+            await _repo.CreateAsync(p);
+        }
+
+        var result = await _repo.GetPinnedAsync(3);
+        Assert.True(result.Count <= 4); // limit+1 = 4
+    }
+
+    [Fact]
+    public async Task GetPinnedAsync_WithLimit_OnlyPinned()
+    {
+        await _repo.CreateAsync(new Prompt { Title = "Pinned", Body = "B", IsPinned = true });
+        await _repo.CreateAsync(new Prompt { Title = "NotPinned", Body = "B", IsPinned = false });
+
+        var result = await _repo.GetPinnedAsync(10);
+        Assert.Single(result);
+        Assert.Equal("Pinned", result[0].Title);
     }
 
     public void Dispose()
