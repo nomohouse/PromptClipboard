@@ -16,6 +16,7 @@ public sealed class Prompt
     public string Lang { get; set; } = string.Empty;
     public string ModelHint { get; set; } = string.Empty;
     public long? VersionParentId { get; set; }
+    public string? BodyHash { get; set; }
 
     public List<string> GetTags()
     {

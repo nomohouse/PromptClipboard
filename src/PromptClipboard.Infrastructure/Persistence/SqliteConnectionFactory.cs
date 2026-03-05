@@ -6,7 +6,10 @@ using Microsoft.Data.Sqlite;
 public sealed class SqliteConnectionFactory
 {
     private readonly string _connectionString;
-    private readonly bool _isSharedMemory;
+    private readonly SqliteConnection? _sentinelConnection;
+
+    public bool IsSharedMemory { get; }
+    public string? DbPath { get; }
 
     public SqliteConnectionFactory(string dbPath)
     {
@@ -20,6 +23,8 @@ public sealed class SqliteConnectionFactory
             Mode = SqliteOpenMode.ReadWriteCreate,
             Cache = SqliteCacheMode.Shared
         }.ToString();
+
+        DbPath = dbPath;
     }
 
     /// <summary>
@@ -30,14 +35,12 @@ public sealed class SqliteConnectionFactory
     {
         _connectionString = sharedConnection.ConnectionString;
         _sentinelConnection = sharedConnection;
-        _isSharedMemory = true;
+        IsSharedMemory = true;
     }
-
-    private readonly SqliteConnection? _sentinelConnection;
 
     public SqliteConnection CreateConnection()
     {
-        if (_isSharedMemory)
+        if (IsSharedMemory)
         {
             // Return a new connection sharing the same in-memory database.
             // The sentinel connection keeps the database alive even when

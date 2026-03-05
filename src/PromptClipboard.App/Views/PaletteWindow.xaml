@@ -2,6 +2,7 @@
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:local="clr-namespace:PromptClipboard.App"
+        xmlns:vm="clr-namespace:PromptClipboard.App.ViewModels"
         Title="Prompt Clipboard"
         Width="700" Height="500"
         WindowStyle="None"
@@ -34,6 +35,8 @@
         </Border.BorderBrush>
         <Grid Margin="0">
             <Grid.RowDefinitions>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="Auto"/>
                 <RowDefinition Height="Auto"/>
                 <RowDefinition Height="Auto"/>
                 <RowDefinition Height="Auto"/>
@@ -83,6 +86,7 @@
                     <ColumnDefinition Width="Auto"/>
                     <ColumnDefinition Width="*"/>
                     <ColumnDefinition Width="Auto"/>
+                    <ColumnDefinition Width="Auto"/>
                 </Grid.ColumnDefinitions>
                 <TextBlock Grid.Column="0" Text="&#xE721;" FontFamily="Segoe MDL2 Assets"
                           Foreground="{StaticResource TextDimBrush}" VerticalAlignment="Center" Margin="0,0,8,0" FontSize="16"/>
@@ -91,17 +95,42 @@
                             Text="{Binding SearchText, UpdateSourceTrigger=PropertyChanged}"
                             Background="Transparent" Foreground="{StaticResource TextBrush}"
                             BorderThickness="0" FontSize="14" VerticalAlignment="Center"
-                            CaretBrush="{StaticResource AccentBrush}"/>
+                            CaretBrush="{StaticResource AccentBrush}"
+                            AutomationProperties.Name="Search prompts"/>
                     <TextBlock Text="Search prompts... (#tag, lang:en)"
                               Foreground="{StaticResource TextDimBrush}" FontSize="14"
                               VerticalAlignment="Center" IsHitTestVisible="False" Margin="2,0,0,0"
                               Visibility="{Binding SearchText, Converter={x:Static local:Converters.StringEmptyToVisibleConverter}}"/>
                 </Grid>
-                <Button Grid.Column="2" Content="+ New"
+                <!-- Clear search button -->
+                <Button Grid.Column="2" Content="&#xE711;" FontFamily="Segoe MDL2 Assets"
+                       FontSize="10" Foreground="{StaticResource TextDimBrush}" Background="Transparent"
+                       BorderThickness="0" Cursor="Hand" Padding="6,6" Margin="4,0,0,0"
+                       Command="{Binding ClearSearchCommand}"
+                       Visibility="{Binding SearchText, Converter={x:Static local:Converters.StringNotEmptyToVisibleConverter}}"
+                       ToolTip="Clear search" AutomationProperties.Name="Clear search"
+                       TabIndex="1">
+                    <Button.Template>
+                        <ControlTemplate TargetType="Button">
+                            <Border x:Name="ClearBorder" Background="Transparent" CornerRadius="4"
+                                    Padding="{TemplateBinding Padding}">
+                                <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                            </Border>
+                            <ControlTemplate.Triggers>
+                                <Trigger Property="IsMouseOver" Value="True">
+                                    <Setter TargetName="ClearBorder" Property="Background" Value="#2a2b4a"/>
+                                </Trigger>
+                            </ControlTemplate.Triggers>
+                        </ControlTemplate>
+                    </Button.Template>
+                </Button>
+                <Button Grid.Column="3" Content="+ New"
                        Command="{Binding CreateCommand}"
                        Background="{StaticResource AccentBrush}" Foreground="White"
                        BorderThickness="0" Padding="12,6" Margin="8,0,0,0"
-                       FontSize="12" Cursor="Hand">
+                       FontSize="12" Cursor="Hand"
+                       AutomationProperties.Name="Create new prompt"
+                       TabIndex="2">
                     <Button.Template>
                         <ControlTemplate TargetType="Button">
                             <Border Background="{TemplateBinding Background}" CornerRadius="16" Padding="{TemplateBinding Padding}">
@@ -116,7 +145,7 @@
             <WrapPanel Grid.Row="2" Margin="16,0,16,8">
                 <Border Background="{StaticResource CardBrush}" CornerRadius="4" Padding="6,2" Margin="0,0,6,0">
                     <TextBlock Foreground="{StaticResource TextDimBrush}" FontSize="11">
-                        <Run FontWeight="Bold" Foreground="{StaticResource TextBrush}">Enter</Run>
+                        <Run FontWeight="Bold" Foreground="{StaticResource TextBrush}">DblClick/Enter</Run>
                         <Run Text=" paste"/>
                     </TextBlock>
                 </Border>
@@ -128,27 +157,369 @@
                 </Border>
                 <Border Background="{StaticResource CardBrush}" CornerRadius="4" Padding="6,2" Margin="0,0,6,0">
                     <TextBlock Foreground="{StaticResource TextDimBrush}" FontSize="11">
-                        <Run FontWeight="Bold" Foreground="{StaticResource TextBrush}">Alt+Enter</Run>
-                        <Run Text=" editor"/>
+                        <Run FontWeight="Bold" Foreground="{StaticResource TextBrush}">Ctrl+N</Run>
+                        <Run Text=" new"/>
                     </TextBlock>
                 </Border>
                 <Border Background="{StaticResource CardBrush}" CornerRadius="4" Padding="6,2" Margin="0,0,6,0">
                     <TextBlock Foreground="{StaticResource TextDimBrush}" FontSize="11">
                         <Run FontWeight="Bold" Foreground="{StaticResource TextBrush}">Esc</Run>
-                        <Run Text=" clear"/>
+                        <Run Text=" clear/close"/>
                     </TextBlock>
+                </Border>
+                <!-- Syntax help icon -->
+                <Border Background="{StaticResource CardBrush}" CornerRadius="4" Padding="6,2" Margin="0,0,6,0"
+                       ToolTip="Search syntax:&#x0a;#tag — filter by tag (multi-tag AND)&#x0a;-#tag — exclude tag&#x0a;-word — exclude word&#x0a;lang:en — filter by language&#x0a;folder:work — filter by folder&#x0a;is:pinned / is:template — filter&#x0a;&quot;exact phrase&quot; — quoted phrase&#x0a;Esc — clear search, then close"
+                       Cursor="Help">
+                    <TextBlock Text="?" Foreground="{StaticResource AccentBrush}" FontSize="11" FontWeight="Bold"/>
                 </Border>
             </WrapPanel>
 
+            <!-- Quick Filter Chips + Sort -->
+            <Grid Grid.Row="3" Margin="16,0,16,8">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto"/>
+                    <ColumnDefinition Width="Auto"/>
+                    <ColumnDefinition Width="Auto"/>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="Auto"/>
+                </Grid.ColumnDefinitions>
+                <ToggleButton Grid.Column="0" Content="Pinned" IsChecked="{Binding IsFilterPinned}"
+                             Foreground="{StaticResource TextDimBrush}" Background="{StaticResource CardBrush}"
+                             BorderThickness="0" Padding="8,4" Margin="0,0,4,0" Cursor="Hand" FontSize="11"
+                             AutomationProperties.Name="Filter pinned" TabIndex="3">
+                    <ToggleButton.Template>
+                        <ControlTemplate TargetType="ToggleButton">
+                            <Border x:Name="ChipBorder" Background="{StaticResource CardBrush}" CornerRadius="12"
+                                    Padding="{TemplateBinding Padding}">
+                                <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                            </Border>
+                            <ControlTemplate.Triggers>
+                                <Trigger Property="IsChecked" Value="True">
+                                    <Setter TargetName="ChipBorder" Property="Background" Value="{StaticResource AccentBrush}"/>
+                                    <Setter Property="Foreground" Value="White"/>
+                                </Trigger>
+                                <Trigger Property="IsMouseOver" Value="True">
+                                    <Setter TargetName="ChipBorder" Property="Background" Value="#2a2b4a"/>
+                                </Trigger>
+                            </ControlTemplate.Triggers>
+                        </ControlTemplate>
+                    </ToggleButton.Template>
+                </ToggleButton>
+                <ToggleButton Grid.Column="1" Content="Recent" IsChecked="{Binding IsFilterRecent}"
+                             Foreground="{StaticResource TextDimBrush}" Background="{StaticResource CardBrush}"
+                             BorderThickness="0" Padding="8,4" Margin="0,0,4,0" Cursor="Hand" FontSize="11"
+                             AutomationProperties.Name="Filter recent" TabIndex="4">
+                    <ToggleButton.Template>
+                        <ControlTemplate TargetType="ToggleButton">
+                            <Border x:Name="ChipBorder" Background="{StaticResource CardBrush}" CornerRadius="12"
+                                    Padding="{TemplateBinding Padding}">
+                                <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                            </Border>
+                            <ControlTemplate.Triggers>
+                                <Trigger Property="IsChecked" Value="True">
+                                    <Setter TargetName="ChipBorder" Property="Background" Value="{StaticResource AccentBrush}"/>
+                                    <Setter Property="Foreground" Value="White"/>
+                                </Trigger>
+                                <Trigger Property="IsMouseOver" Value="True">
+                                    <Setter TargetName="ChipBorder" Property="Background" Value="#2a2b4a"/>
+                                </Trigger>
+                            </ControlTemplate.Triggers>
+                        </ControlTemplate>
+                    </ToggleButton.Template>
+                </ToggleButton>
+                <ToggleButton Grid.Column="2" Content="Templates" IsChecked="{Binding IsFilterTemplates}"
+                             Foreground="{StaticResource TextDimBrush}" Background="{StaticResource CardBrush}"
+                             BorderThickness="0" Padding="8,4" Margin="0,0,4,0" Cursor="Hand" FontSize="11"
+                             AutomationProperties.Name="Filter templates" TabIndex="5">
+                    <ToggleButton.Template>
+                        <ControlTemplate TargetType="ToggleButton">
+                            <Border x:Name="ChipBorder" Background="{StaticResource CardBrush}" CornerRadius="12"
+                                    Padding="{TemplateBinding Padding}">
+                                <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                            </Border>
+                            <ControlTemplate.Triggers>
+                                <Trigger Property="IsChecked" Value="True">
+                                    <Setter TargetName="ChipBorder" Property="Background" Value="{StaticResource AccentBrush}"/>
+                                    <Setter Property="Foreground" Value="White"/>
+                                </Trigger>
+                                <Trigger Property="IsMouseOver" Value="True">
+                                    <Setter TargetName="ChipBorder" Property="Background" Value="#2a2b4a"/>
+                                </Trigger>
+                            </ControlTemplate.Triggers>
+                        </ControlTemplate>
+                    </ToggleButton.Template>
+                </ToggleButton>
+                <ComboBox Grid.Column="4" SelectedItem="{Binding CurrentSortMode}"
+                         ItemsSource="{Binding Source={x:Static local:Converters.SortModeValues}}"
+                         Background="{StaticResource CardBrush}" Foreground="{StaticResource TextDimBrush}"
+                         BorderThickness="0" FontSize="11" Padding="6,4" MinWidth="90"
+                         AutomationProperties.Name="Sort order" TabIndex="6"/>
+            </Grid>
+
             <!-- No-Target Hint -->
-            <Border Grid.Row="3" Background="#3b1219" CornerRadius="6" Padding="8,4" Margin="16,0,16,8"
+            <Border Grid.Row="4" Background="#3b1219" CornerRadius="6" Padding="8,4" Margin="16,0,16,8"
                     Visibility="{Binding HasTarget, Converter={x:Static local:Converters.InverseBoolToVisibilityConverter}}">
                 <TextBlock Text="No target window - use the copy button"
                           Foreground="#fca5a5" FontSize="12"/>
             </Border>
 
-            <!-- Prompt List -->
-            <ListBox x:Name="PromptListBox" Grid.Row="4" Margin="16,0,16,16"
+            <!-- Result count -->
+            <TextBlock Grid.Row="5" Text="{Binding ResultCountText}" Foreground="{StaticResource TextDimBrush}"
+                      FontSize="11" Margin="16,0,16,4"
+                      Visibility="{Binding ResultCountText, Converter={x:Static local:Converters.StringNotEmptyToVisibleConverter}}"
+                      AutomationProperties.Name="Result count"/>
+
+            <!-- Empty Database State -->
+            <StackPanel Grid.Row="6" VerticalAlignment="Center" HorizontalAlignment="Center" Margin="16,40,16,16"
+                       Visibility="{Binding ShowEmptyDatabase, Converter={x:Static local:Converters.BoolToVisibilityConverter}}">
+                <TextBlock Text="No prompts yet" Foreground="{StaticResource TextBrush}" FontSize="16" FontWeight="SemiBold"
+                          HorizontalAlignment="Center" Margin="0,0,0,8"/>
+                <TextBlock Text="Create your first prompt with Ctrl+N" Foreground="{StaticResource TextDimBrush}" FontSize="13"
+                          HorizontalAlignment="Center" Margin="0,0,0,12"/>
+                <Button Content="+ Create prompt" Command="{Binding CreateCommand}"
+                       Background="{StaticResource AccentBrush}" Foreground="White"
+                       BorderThickness="0" Padding="16,8" Cursor="Hand" FontSize="13"
+                       HorizontalAlignment="Center"
+                       AutomationProperties.Name="Create first prompt">
+                    <Button.Template>
+                        <ControlTemplate TargetType="Button">
+                            <Border Background="{TemplateBinding Background}" CornerRadius="16" Padding="{TemplateBinding Padding}">
+                                <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                            </Border>
+                        </ControlTemplate>
+                    </Button.Template>
+                </Button>
+            </StackPanel>
+
+            <!-- No Results State -->
+            <StackPanel Grid.Row="6" VerticalAlignment="Center" HorizontalAlignment="Center" Margin="16,40,16,16"
+                       Visibility="{Binding ShowNoResults, Converter={x:Static local:Converters.BoolToVisibilityConverter}}">
+                <TextBlock Text="Nothing found" Foreground="{StaticResource TextBrush}" FontSize="16" FontWeight="SemiBold"
+                          HorizontalAlignment="Center" Margin="0,0,0,8"/>
+                <TextBlock Text="Try a different search or create a new prompt" Foreground="{StaticResource TextDimBrush}" FontSize="13"
+                          HorizontalAlignment="Center" Margin="0,0,0,12"/>
+                <Button Content="+ Create from search" Command="{Binding CreateWithTitleCommand}"
+                       Background="{StaticResource AccentBrush}" Foreground="White"
+                       BorderThickness="0" Padding="16,8" Cursor="Hand" FontSize="13"
+                       HorizontalAlignment="Center"
+                       AutomationProperties.Name="Create prompt from search text">
+                    <Button.Template>
+                        <ControlTemplate TargetType="Button">
+                            <Border Background="{TemplateBinding Background}" CornerRadius="16" Padding="{TemplateBinding Padding}">
+                                <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                            </Border>
+                        </ControlTemplate>
+                    </Button.Template>
+                </Button>
+            </StackPanel>
+
+            <!-- Load Error State -->
+            <StackPanel Grid.Row="6" VerticalAlignment="Center" HorizontalAlignment="Center" Margin="16,40,16,16"
+                       Visibility="{Binding ShowLoadError, Converter={x:Static local:Converters.BoolToVisibilityConverter}}">
+                <TextBlock Text="{Binding TransientLoadError}" Foreground="#fca5a5" FontSize="13"
+                          HorizontalAlignment="Center" Margin="0,0,0,12" TextWrapping="Wrap"/>
+                <StackPanel Orientation="Horizontal" HorizontalAlignment="Center">
+                    <Button Content="Retry" Command="{Binding RetryLoadCommand}"
+                           Background="{StaticResource AccentBrush}" Foreground="White"
+                           BorderThickness="0" Padding="12,6" Cursor="Hand" FontSize="12" Margin="0,0,8,0"
+                           AutomationProperties.Name="Retry loading prompts">
+                        <Button.Template>
+                            <ControlTemplate TargetType="Button">
+                                <Border Background="{TemplateBinding Background}" CornerRadius="16" Padding="{TemplateBinding Padding}">
+                                    <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                </Border>
+                            </ControlTemplate>
+                        </Button.Template>
+                    </Button>
+                    <Button Content="Dismiss" Command="{Binding DismissErrorCommand}"
+                           Background="{StaticResource CardBrush}" Foreground="{StaticResource TextDimBrush}"
+                           BorderThickness="0" Padding="12,6" Cursor="Hand" FontSize="12"
+                           AutomationProperties.Name="Dismiss error">
+                        <Button.Template>
+                            <ControlTemplate TargetType="Button">
+                                <Border Background="{TemplateBinding Background}" CornerRadius="16" Padding="{TemplateBinding Padding}">
+                                    <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                </Border>
+                            </ControlTemplate>
+                        </Button.Template>
+                    </Button>
+                </StackPanel>
+            </StackPanel>
+
+            <!-- CTA Banner: New prompt created -->
+            <Border Grid.Row="6" Background="#1e3a5f" CornerRadius="6" Padding="8,6" Margin="16,0,16,8"
+                    Visibility="{Binding ShowNewPromptBanner, Converter={x:Static local:Converters.BoolToVisibilityConverter}}"
+                    VerticalAlignment="Top" Panel.ZIndex="1">
+                <DockPanel>
+                    <Button DockPanel.Dock="Right" Content="Show it" Command="{Binding RevealNewPromptCommand}"
+                           Background="{StaticResource AccentBrush}" Foreground="White"
+                           BorderThickness="0" Padding="10,4" Cursor="Hand" FontSize="11"
+                           AutomationProperties.Name="Show new prompt">
+                        <Button.Template>
+                            <ControlTemplate TargetType="Button">
+                                <Border Background="{TemplateBinding Background}" CornerRadius="10" Padding="{TemplateBinding Padding}">
+                                    <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                </Border>
+                            </ControlTemplate>
+                        </Button.Template>
+                    </Button>
+                    <TextBlock Text="New prompt created" Foreground="#93c5fd" FontSize="12" VerticalAlignment="Center"/>
+                </DockPanel>
+            </Border>
+
+            <!-- QuickAdd Form (visible when Mode=QuickAdd) -->
+            <ScrollViewer Grid.Row="6" Margin="16,0,16,16" VerticalScrollBarVisibility="Auto">
+                <ScrollViewer.Style>
+                    <Style TargetType="ScrollViewer">
+                        <Setter Property="Visibility" Value="Collapsed"/>
+                        <Style.Triggers>
+                            <DataTrigger Binding="{Binding Mode}" Value="{x:Static vm:PaletteMode.QuickAdd}">
+                                <Setter Property="Visibility" Value="Visible"/>
+                            </DataTrigger>
+                        </Style.Triggers>
+                    </Style>
+                </ScrollViewer.Style>
+                <StackPanel DataContext="{Binding QuickAdd}">
+                    <TextBlock Text="Quick Add" Foreground="{StaticResource TextBrush}" FontSize="16" FontWeight="SemiBold" Margin="0,0,0,12"/>
+
+                    <TextBlock Text="Title" Foreground="{StaticResource TextDimBrush}" FontSize="11" Margin="0,0,0,4"/>
+                    <TextBox Text="{Binding Title, UpdateSourceTrigger=PropertyChanged}"
+                            Background="{StaticResource CardBrush}" Foreground="{StaticResource TextBrush}"
+                            BorderThickness="1" BorderBrush="#3a3b5a" Padding="8,6" FontSize="13"
+                            CaretBrush="{StaticResource AccentBrush}"
+                            AutomationProperties.Name="Prompt title"/>
+
+                    <TextBlock Text="Body" Foreground="{StaticResource TextDimBrush}" FontSize="11" Margin="0,8,0,4"/>
+                    <TextBox Text="{Binding Body, UpdateSourceTrigger=PropertyChanged}"
+                            Background="{StaticResource CardBrush}" Foreground="{StaticResource TextBrush}"
+                            BorderThickness="1" BorderBrush="#3a3b5a" Padding="8,6" FontSize="13"
+                            AcceptsReturn="True" TextWrapping="Wrap" MinHeight="80" MaxHeight="160"
+                            VerticalScrollBarVisibility="Auto"
+                            CaretBrush="{StaticResource AccentBrush}"
+                            AutomationProperties.Name="Prompt body"/>
+
+                    <TextBlock Text="Tags (comma separated)" Foreground="{StaticResource TextDimBrush}" FontSize="11" Margin="0,8,0,4"/>
+                    <TextBox Text="{Binding TagsInput, UpdateSourceTrigger=PropertyChanged}"
+                            Background="{StaticResource CardBrush}" Foreground="{StaticResource TextBrush}"
+                            BorderThickness="1" BorderBrush="#3a3b5a" Padding="8,6" FontSize="13"
+                            CaretBrush="{StaticResource AccentBrush}"
+                            AutomationProperties.Name="Tags"/>
+
+                    <Grid Margin="0,8,0,0">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="Auto"/>
+                        </Grid.ColumnDefinitions>
+                        <StackPanel>
+                            <TextBlock Text="Language" Foreground="{StaticResource TextDimBrush}" FontSize="11" Margin="0,0,0,4"/>
+                            <TextBox Text="{Binding Lang, UpdateSourceTrigger=PropertyChanged}"
+                                    Background="{StaticResource CardBrush}" Foreground="{StaticResource TextBrush}"
+                                    BorderThickness="1" BorderBrush="#3a3b5a" Padding="8,6" FontSize="13"
+                                    CaretBrush="{StaticResource AccentBrush}" Width="120" HorizontalAlignment="Left"
+                                    AutomationProperties.Name="Language"/>
+                        </StackPanel>
+                    </Grid>
+
+                    <!-- Duplicate Warning -->
+                    <Border Margin="0,8,0,0" CornerRadius="6" Padding="8,6"
+                            Visibility="{Binding DuplicateWarning, Converter={x:Static local:Converters.StringNotEmptyToVisibleConverter}}">
+                        <Border.Style>
+                            <Style TargetType="Border">
+                                <Setter Property="Background" Value="#3b2e1a"/>
+                                <Style.Triggers>
+                                    <DataTrigger Binding="{Binding DuplicateSeverity}" Value="{x:Static vm:DuplicateSeverity.Hard}">
+                                        <Setter Property="Background" Value="#3b1219"/>
+                                    </DataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </Border.Style>
+                        <StackPanel>
+                            <TextBlock Text="{Binding DuplicateWarning}" FontSize="12" Margin="0,0,0,6" TextWrapping="Wrap">
+                                <TextBlock.Style>
+                                    <Style TargetType="TextBlock">
+                                        <Setter Property="Foreground" Value="#fbbf24"/>
+                                        <Style.Triggers>
+                                            <DataTrigger Binding="{Binding DuplicateSeverity}" Value="{x:Static vm:DuplicateSeverity.Hard}">
+                                                <Setter Property="Foreground" Value="#fca5a5"/>
+                                            </DataTrigger>
+                                        </Style.Triggers>
+                                    </Style>
+                                </TextBlock.Style>
+                            </TextBlock>
+                            <StackPanel Orientation="Horizontal">
+                                <Button Content="Save anyway" Command="{Binding SaveAnywayCommand}"
+                                       Foreground="White" BorderThickness="0" Padding="8,4" Cursor="Hand" FontSize="11" Margin="0,0,6,0"
+                                       AutomationProperties.Name="Save anyway">
+                                    <Button.Template>
+                                        <ControlTemplate TargetType="Button">
+                                            <Border Background="{StaticResource AccentBrush}" CornerRadius="10" Padding="{TemplateBinding Padding}">
+                                                <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                            </Border>
+                                        </ControlTemplate>
+                                    </Button.Template>
+                                </Button>
+                                <Button Content="Open existing" Command="{Binding OpenDuplicateCommand}"
+                                       Background="{StaticResource CardBrush}" Foreground="{StaticResource TextDimBrush}"
+                                       BorderThickness="0" Padding="8,4" Cursor="Hand" FontSize="11" Margin="0,0,6,0"
+                                       AutomationProperties.Name="Open existing">
+                                    <Button.Template>
+                                        <ControlTemplate TargetType="Button">
+                                            <Border Background="{StaticResource CardBrush}" CornerRadius="10" Padding="{TemplateBinding Padding}">
+                                                <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                            </Border>
+                                        </ControlTemplate>
+                                    </Button.Template>
+                                </Button>
+                                <Button Content="Cancel" Command="{Binding CancelDuplicateCommand}"
+                                       Background="Transparent" Foreground="{StaticResource TextDimBrush}"
+                                       BorderThickness="0" Padding="8,4" Cursor="Hand" FontSize="11"
+                                       AutomationProperties.Name="Cancel duplicate warning">
+                                    <Button.Template>
+                                        <ControlTemplate TargetType="Button">
+                                            <Border Background="Transparent" CornerRadius="10" Padding="{TemplateBinding Padding}">
+                                                <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                            </Border>
+                                        </ControlTemplate>
+                                    </Button.Template>
+                                </Button>
+                            </StackPanel>
+                        </StackPanel>
+                    </Border>
+
+                    <!-- Save/Cancel buttons -->
+                    <StackPanel Orientation="Horizontal" Margin="0,12,0,0">
+                        <Button Content="Save (Ctrl+Enter)" Command="{Binding SaveCommand}"
+                               Background="{StaticResource AccentBrush}" Foreground="White"
+                               BorderThickness="0" Padding="12,6" Cursor="Hand" FontSize="12" Margin="0,0,8,0"
+                               AutomationProperties.Name="Save prompt">
+                            <Button.Template>
+                                <ControlTemplate TargetType="Button">
+                                    <Border Background="{TemplateBinding Background}" CornerRadius="16" Padding="{TemplateBinding Padding}">
+                                        <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                    </Border>
+                                </ControlTemplate>
+                            </Button.Template>
+                        </Button>
+                        <Button Content="Cancel (Esc)"
+                               Command="{Binding DataContext.HandleEscapeCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                               Background="{StaticResource CardBrush}" Foreground="{StaticResource TextDimBrush}"
+                               BorderThickness="0" Padding="12,6" Cursor="Hand" FontSize="12"
+                               AutomationProperties.Name="Cancel quick add">
+                            <Button.Template>
+                                <ControlTemplate TargetType="Button">
+                                    <Border Background="{TemplateBinding Background}" CornerRadius="16" Padding="{TemplateBinding Padding}">
+                                        <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                    </Border>
+                                </ControlTemplate>
+                            </Button.Template>
+                        </Button>
+                    </StackPanel>
+                </StackPanel>
+            </ScrollViewer>
+
+            <!-- Prompt List (visible when Mode=List) -->
+            <ListBox x:Name="PromptListBox" Grid.Row="6" Margin="16,0,16,16"
                      ItemsSource="{Binding Prompts}"
                      SelectedItem="{Binding SelectedPrompt, Mode=TwoWay}"
                      SelectedIndex="{Binding SelectedIndex, Mode=TwoWay}"
@@ -157,6 +528,15 @@
                      ScrollViewer.VerticalScrollBarVisibility="Auto"
                      FocusVisualStyle="{x:Null}"
                      HorizontalContentAlignment="Stretch">
+                <ListBox.Style>
+                    <Style TargetType="ListBox">
+                        <Style.Triggers>
+                            <DataTrigger Binding="{Binding Mode}" Value="{x:Static vm:PaletteMode.QuickAdd}">
+                                <Setter Property="Visibility" Value="Collapsed"/>
+                            </DataTrigger>
+                        </Style.Triggers>
+                    </Style>
+                </ListBox.Style>
                 <ListBox.ItemContainerStyle>
                     <Style TargetType="ListBoxItem">
                         <Setter Property="FocusVisualStyle" Value="{x:Null}"/>

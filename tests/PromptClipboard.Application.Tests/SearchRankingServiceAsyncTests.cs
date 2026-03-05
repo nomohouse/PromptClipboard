@@ -28,7 +28,7 @@ public class SearchRankingServiceAsyncTests : IDisposable
         runner.RunAll();
 
         _repo = new SqlitePromptRepository(factory);
-        _service = new SearchRankingService(_repo);
+        _service = new SearchRankingService(_repo, _repo);
     }
 
     [Fact]
@@ -43,10 +43,10 @@ public class SearchRankingServiceAsyncTests : IDisposable
         var recentId = await _repo.CreateAsync(recent);
         await _repo.MarkUsedAsync(recentId, DateTime.UtcNow);
 
-        var results = await _service.SearchAsync("");
+        var result = await _service.SearchAsync("");
 
-        Assert.True(results.Count >= 2);
-        Assert.Equal("Pinned", results[0].Title);
+        Assert.True(result.Items.Count >= 2);
+        Assert.Equal("Pinned", result.Items[0].Title);
     }
 
     [Fact]
@@ -60,10 +60,10 @@ public class SearchRankingServiceAsyncTests : IDisposable
         p2.SetTags(["jira"]);
         await _repo.CreateAsync(p2);
 
-        var results = await _service.SearchAsync("#email");
+        var result = await _service.SearchAsync("#email");
 
-        Assert.Single(results);
-        Assert.Equal("Email prompt", results[0].Title);
+        Assert.Single(result.Items);
+        Assert.Equal("Email prompt", result.Items[0].Title);
     }
 
     [Fact]
@@ -77,10 +77,10 @@ public class SearchRankingServiceAsyncTests : IDisposable
         p2.SetTags(["code"]);
         await _repo.CreateAsync(p2);
 
-        var results = await _service.SearchAsync("professional");
+        var result = await _service.SearchAsync("professional");
 
-        Assert.Single(results);
-        Assert.Equal("Professional email", results[0].Title);
+        Assert.Single(result.Items);
+        Assert.Equal("Professional email", result.Items[0].Title);
     }
 
     [Fact]

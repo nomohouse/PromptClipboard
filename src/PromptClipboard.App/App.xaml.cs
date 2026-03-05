@@ -5,6 +5,7 @@ using System.Windows.Threading;
 using Hardcodet.Wpf.TaskbarNotification;
 using Microsoft.Extensions.DependencyInjection;
 using PromptClipboard.App.Handlers;
+using PromptClipboard.App.Interfaces;
 using PromptClipboard.App.ViewModels;
 using PromptClipboard.App.Views;
 using PromptClipboard.Application.Services;
@@ -72,11 +73,53 @@ public partial class App : System.Windows.Application
 
             // Database
             var migrationRunner = _services.GetRequiredService<MigrationRunner>();
-            migrationRunner.RunAll();
+            try
+            {
+                migrationRunner.RunAll();
+            }
+            catch (BackupFailedException ex)
+            {
+                _log.Fatal(ex, "Database migration blocked — backup failed");
+                var errorHandler = _services.GetRequiredService<IStartupErrorHandler>();
+                errorHandler.HandleFatalError(
+                    "Prompt Clipboard — Startup Error",
+                    $"Database upgrade requires a backup, but backup failed:\n{ex.InnerException?.Message}\n\n" +
+                    "Please check disk space/permissions and restart the application.",
+                    ex);
+                return;
+            }
+            catch (IncompatibleSchemaException ex)
+            {
+                _log.Fatal(ex, "Database migration blocked — incompatible schema");
+                var errorHandler = _services.GetRequiredService<IStartupErrorHandler>();
+                errorHandler.HandleFatalError(
+                    "Prompt Clipboard — Startup Error",
+                    $"Database schema is incompatible with this version:\n{ex.Message}\n\n" +
+                    "Please restore from backup or run manual migration.",
+                    ex);
+                return;
+            }
 
             // Seed data
-            await PromptSeeder.SeedIfEmptyAsync(
-                _services.GetRequiredService<IPromptRepository>(), _log);
+            await PromptSeeder.SeedIfNeededAsync(
+                _services.GetRequiredService<IPromptRepository>(),
+                _services.GetRequiredService<ISettingsService>(),
+                _log);
+
+            // Analytics cleanup (runs if enabled)
+            var currentSettings = _services.GetRequiredService<ISettingsService>().Load();
+            if (currentSettings.EnableUsageStats)
+            {
+                try
+                {
+                    var analytics = _services.GetRequiredService<IAnalyticsService>();
+                    await analytics.CleanupAsync(currentSettings.StatsRetentionDays, currentSettings.StatsMaxRows);
+                }
+                catch (Exception ex)
+                {
+                    _log.Warning(ex, "Analytics cleanup failed (non-fatal)");
+                }
+            }
 
             // Palette window
             _paletteWindow = new PaletteWindow();
@@ -86,11 +129,20 @@ public partial class App : System.Windows.Application
             var paletteVm = _services.GetRequiredService<PaletteViewModel>();
             _paletteWindow.DataContext = paletteVm;
 
+            // Wire QuickAdd sub-VM
+            var quickAdd = new QuickAddViewModel(
+                _services.GetRequiredService<IPromptRepository>(),
+                _services.GetRequiredService<ITagSuggestionRepository>(),
+                _services.GetRequiredService<IDuplicateDetectionRepository>(),
+                Log.Logger);
+            paletteVm.InitializeQuickAdd(quickAdd);
+
             // Wire events
             paletteVm.PasteRequested += OnPasteRequested;
             paletteVm.PasteAsTextRequested += OnPasteAsTextRequested;
             paletteVm.EditRequested += OnEditRequested;
             paletteVm.CreateRequested += OnCreateRequested;
+            paletteVm.CreateWithTitleRequested += OnCreateWithTitleRequested;
             paletteVm.CloseRequested += () =>
             {
                 _log?.Debug("CloseRequested fired");
@@ -196,7 +248,11 @@ public partial class App : System.Windows.Application
         services.AddSingleton<ISettingsService>(settings);
         services.AddSingleton(connectionFactory);
         services.AddSingleton(new MigrationRunner(connectionFactory, Log.Logger));
-        services.AddSingleton<IPromptRepository, SqlitePromptRepository>();
+        services.AddSingleton<SqlitePromptRepository>();
+        services.AddSingleton<IPromptRepository>(sp => sp.GetRequiredService<SqlitePromptRepository>());
+        services.AddSingleton<IAdvancedSearchRepository>(sp => sp.GetRequiredService<SqlitePromptRepository>());
+        services.AddSingleton<ITagSuggestionRepository>(sp => sp.GetRequiredService<SqlitePromptRepository>());
+        services.AddSingleton<IDuplicateDetectionRepository>(sp => sp.GetRequiredService<SqlitePromptRepository>());
         services.AddSingleton<SearchRankingService>();
         services.AddSingleton<TemplateEngine>();
         services.AddSingleton<ImportExportUseCase>();
@@ -209,6 +265,8 @@ public partial class App : System.Windows.Application
         services.AddSingleton<IntegrityLevelChecker>();
         services.AddSingleton<IUpdateService, VelopackUpdateService>();
         services.AddSingleton<PastePromptUseCase>();
+        services.AddSingleton<IStartupErrorHandler, StartupErrorHandler>();
+        services.AddSingleton<IAnalyticsService>(new SqliteAnalyticsService(AppDataPath, Log.Logger));
         services.AddSingleton<PaletteViewModel>();
     }
 
@@ -279,23 +337,38 @@ public partial class App : System.Windows.Application
         ShowPalette();
     }
 
+    private bool _isShowingPalette;
+
     private async void ShowPalette()
     {
         if (_paletteWindow == null) return;
-
+        if (_isShowingPalette) return;
+        _isShowingPalette = true;
         try
         {
             var focusTracker = _services!.GetRequiredService<IFocusTracker>();
             _paletteWindow.ViewModel.HasTarget = focusTracker.SavedHwnd != IntPtr.Zero;
             _log?.Debug("ShowPalette: hasTarget={HasTarget}", _paletteWindow.ViewModel.HasTarget);
 
+            // Stage: load data BEFORE showing window for correct empty state
+            var countTask = _paletteWindow.ViewModel.RefreshTotalCountAsync();
+            var loadTask = _paletteWindow.ViewModel.LoadPromptsAsync();
+            await Task.WhenAll(countTask, loadTask);
+
+            // Show: data is already loaded, empty state is correct
             _paletteWindow.ShowAndFocus();
-            await _paletteWindow.ViewModel.LoadPromptsAsync();
             _log?.Debug("ShowPalette: loaded {Count} prompts", _paletteWindow.ViewModel.Prompts.Count);
         }
         catch (Exception ex)
         {
             _log?.Error(ex, "ShowPalette failed");
+            _paletteWindow.ViewModel.SetTransientLoadError(
+                "Couldn't load prompts. Check database file/permissions and try again.");
+            _paletteWindow.ShowAndFocus();
+        }
+        finally
+        {
+            _isShowingPalette = false;
         }
     }
 
@@ -356,12 +429,49 @@ public partial class App : System.Windows.Application
                 _paletteWindow.SuppressDeactivate(false);
             }
 
+            await _paletteWindow.ViewModel.RefreshTotalCountAsync();
             await _paletteWindow.ViewModel.LoadPromptsAsync();
             _paletteWindow.Activate();
         }
         catch (Exception ex)
         {
             _log?.Error(ex, "OnCreateRequested failed");
+        }
+    }
+
+    private async void OnCreateWithTitleRequested(string title, string? tag, string? lang)
+    {
+        _log?.Information("OnCreateWithTitleRequested: title='{Title}', tag='{Tag}', lang='{Lang}'", title, tag, lang);
+        if (_services == null || _paletteWindow == null) return;
+
+        try
+        {
+            _paletteWindow.SuppressDeactivate(true);
+            try
+            {
+                var vm = new EditorViewModel(_services.GetRequiredService<IPromptRepository>());
+                vm.LoadForCreate();
+                vm.Title = title;
+                if (tag != null) vm.TagsInput = tag;
+                if (lang != null) vm.Lang = lang;
+                var editor = new EditorWindow();
+                editor.Initialize(vm);
+                editor.Owner = _paletteWindow;
+                editor.ShowDialog();
+                _log?.Debug("CreateWithTitle editor closed");
+            }
+            finally
+            {
+                _paletteWindow.SuppressDeactivate(false);
+            }
+
+            await _paletteWindow.ViewModel.RefreshTotalCountAsync();
+            await _paletteWindow.ViewModel.LoadPromptsAsync();
+            _paletteWindow.Activate();
+        }
+        catch (Exception ex)
+        {
+            _log?.Error(ex, "OnCreateWithTitleRequested failed");
         }
     }
 
@@ -429,6 +539,7 @@ public partial class App : System.Windows.Application
             var repo = _services.GetRequiredService<IPromptRepository>();
             await repo.DeleteAsync(prompt.Id);
             _log?.Information("Prompt {Id} deleted", prompt.Id);
+            await _paletteWindow.ViewModel.RefreshTotalCountAsync();
             await _paletteWindow.ViewModel.LoadPromptsAsync();
             _paletteWindow.Activate();
         }
