@@ -21,7 +21,10 @@
                                   Foreground="#e2e8f0" FontSize="13"/>
                         <TextBox Text="{Binding Value, UpdateSourceTrigger=PropertyChanged}"
                                 Background="#242540" Foreground="#e2e8f0" BorderBrush="#3d3e6b"
-                                Padding="8" FontSize="13"/>
+                                Padding="8" FontSize="13"
+                                AcceptsReturn="True" TextWrapping="Wrap"
+                                MinHeight="32" MaxHeight="120"
+                                VerticalScrollBarVisibility="Auto"/>
                     </StackPanel>
                 </DataTemplate>
             </ItemsControl.ItemTemplate>

@@ -1,5 +1,6 @@
 namespace PromptClipboard.App;
 
+using PromptClipboard.Domain.Models;
 using System.Globalization;
 using System.Text.Json;
 using System.Windows;
@@ -8,6 +9,8 @@ using System.Windows.Media;
 
 public static class Converters
 {
+    public static SortMode[] SortModeValues { get; } = Enum.GetValues<SortMode>();
+
     public static IValueConverter HasTemplateConverter { get; } = new HasTemplateVariablesConverter();
     public static IValueConverter JsonToTagListConverter { get; } = new JsonToTagListConverterImpl();
     public static IValueConverter TagsNotEmptyConverter { get; } = new TagsNotEmptyConverterImpl();

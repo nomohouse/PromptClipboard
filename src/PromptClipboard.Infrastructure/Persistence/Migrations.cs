@@ -60,4 +60,11 @@ public static class Migrations
                 VALUES (new.id, new.title, new.body, new.tags_text);
         END;
     """;
+
+    public const string V003_AddIndexes = """
+        CREATE INDEX IF NOT EXISTS idx_prompts_pinned ON prompts(is_pinned);
+        CREATE INDEX IF NOT EXISTS idx_prompts_last_used ON prompts(last_used_at DESC);
+        CREATE INDEX IF NOT EXISTS idx_prompts_use_count ON prompts(use_count DESC);
+        CREATE INDEX IF NOT EXISTS idx_prompts_folder ON prompts(folder) WHERE folder != '';
+    """;
 }

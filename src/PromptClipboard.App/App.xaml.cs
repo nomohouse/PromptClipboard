@@ -199,7 +199,9 @@ public partial class App : System.Windows.Application
         services.AddSingleton<ISettingsService>(settings);
         services.AddSingleton(connectionFactory);
         services.AddSingleton(new MigrationRunner(connectionFactory, Log.Logger));
-        services.AddSingleton<IPromptRepository, SqlitePromptRepository>();
+        services.AddSingleton<SqlitePromptRepository>();
+        services.AddSingleton<IPromptRepository>(sp => sp.GetRequiredService<SqlitePromptRepository>());
+        services.AddSingleton<IAdvancedSearchRepository>(sp => sp.GetRequiredService<SqlitePromptRepository>());
         services.AddSingleton<SearchRankingService>();
         services.AddSingleton<TemplateEngine>();
         services.AddSingleton<ImportExportUseCase>();

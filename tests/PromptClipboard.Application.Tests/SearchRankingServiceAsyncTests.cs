@@ -28,7 +28,7 @@ public class SearchRankingServiceAsyncTests : IDisposable
         runner.RunAll();
 
         _repo = new SqlitePromptRepository(factory);
-        _service = new SearchRankingService(_repo);
+        _service = new SearchRankingService(_repo, _repo);
     }
 
     [Fact]

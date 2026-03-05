@@ -4,25 +4,69 @@ using PromptClipboard.Application.Models;
 using PromptClipboard.Domain;
 using PromptClipboard.Domain.Entities;
 using PromptClipboard.Domain.Interfaces;
-using System.Text.RegularExpressions;
-
-public sealed partial class SearchRankingService
+using PromptClipboard.Domain.Models;
+public sealed class SearchRankingService
 {
     private readonly IPromptRepository _repository;
+    private readonly IAdvancedSearchRepository? _advancedRepo;
 
-    public SearchRankingService(IPromptRepository repository)
+    public SearchRankingService(IPromptRepository repository, IAdvancedSearchRepository? advancedRepo = null)
     {
         _repository = repository;
+        _advancedRepo = advancedRepo;
     }
 
-    public async Task<SearchResult> SearchAsync(string rawQuery, CancellationToken ct = default)
+    public Task<SearchResult> SearchAsync(string rawQuery, CancellationToken ct = default)
+    {
+        if (_advancedRepo != null)
+        {
+            var parsed = SearchQueryParser.Parse(rawQuery);
+            return SearchAsync(parsed, ct);
+        }
+        return SearchLegacyAsync(rawQuery, ct);
+    }
+
+    public Task<SearchResult> SearchAsync(SearchQuery query, CancellationToken ct = default)
+    {
+        if (IsDefaultListQuery(query))
+            return GetDefaultListAsync(ct);
+        return SearchAdvancedAsync(query, ct);
+    }
+
+    private static bool IsDefaultListQuery(SearchQuery q)
+        => q.FreeTextTerms.Count == 0
+           && q.IncludeTags.Count == 0
+           && q.ExcludeTags.Count == 0
+           && q.ExcludeWords.Count == 0
+           && string.IsNullOrWhiteSpace(q.FolderFilter)
+           && string.IsNullOrWhiteSpace(q.LangFilter)
+           && q.PinnedFilter is not true
+           && q.HasTemplate is not true
+           && q.RecentLimit is null
+           && q.Sort == SortMode.Relevance;
+
+    private async Task<SearchResult> SearchAdvancedAsync(SearchQuery query, CancellationToken ct)
+    {
+        var results = await _advancedRepo!.SearchAsync(query, ct);
+
+        var hasMore = results.Count > SearchDefaults.MaxResults;
+        if (hasMore)
+            results = results.Take(SearchDefaults.MaxResults).ToList();
+
+        return new SearchResult(results, hasMore, query.IsTruncated);
+    }
+
+    private async Task<SearchResult> SearchLegacyAsync(string rawQuery, CancellationToken ct)
     {
         if (string.IsNullOrWhiteSpace(rawQuery))
         {
             return await GetDefaultListAsync(ct);
         }
 
-        var (query, tagFilter, langFilter) = ParseQuery(rawQuery);
+        var parsed = SearchQueryParser.Parse(rawQuery);
+        var query = string.Join(" ", parsed.FreeTextTerms);
+        var tagFilter = parsed.IncludeTags.Count > 0 ? parsed.IncludeTags[0] : null;
+        var langFilter = parsed.LangFilter;
 
         List<Prompt> results;
         if (string.IsNullOrWhiteSpace(query) && tagFilter != null)
@@ -39,7 +83,7 @@ public sealed partial class SearchRankingService
         if (hasMore)
             results = results.Take(SearchDefaults.MaxResults).ToList();
 
-        return new SearchResult(results, hasMore, IsTruncated: false);
+        return new SearchResult(results, hasMore, parsed.IsTruncated);
     }
 
     /// <summary>
@@ -106,36 +150,4 @@ public sealed partial class SearchRankingService
         return new SearchResult(merged, hasMore, IsTruncated: false);
     }
 
-    /// <summary>
-    /// Temporary public API for P0 (DSL parsing in App layer). Removed in P1 when SearchQueryParser replaces it.
-    /// </summary>
-    public static (string Query, string? TagFilter, string? LangFilter) ParseQuery(string rawQuery)
-    {
-        string? tagFilter = null;
-        string? langFilter = null;
-
-        var remaining = rawQuery;
-
-        var tagMatch = TagPattern().Match(remaining);
-        if (tagMatch.Success)
-        {
-            tagFilter = tagMatch.Groups[1].Value.ToLowerInvariant();
-            remaining = remaining.Remove(tagMatch.Index, tagMatch.Length).Trim();
-        }
-
-        var langMatch = LangPattern().Match(remaining);
-        if (langMatch.Success)
-        {
-            langFilter = langMatch.Groups[1].Value;
-            remaining = remaining.Remove(langMatch.Index, langMatch.Length).Trim();
-        }
-
-        return (remaining.Trim(), tagFilter, langFilter);
-    }
-
-    [GeneratedRegex(@"#(\w+)", RegexOptions.IgnoreCase)]
-    private static partial Regex TagPattern();
-
-    [GeneratedRegex(@"lang:(\w+)", RegexOptions.IgnoreCase)]
-    private static partial Regex LangPattern();
 }

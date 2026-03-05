@@ -6,9 +6,9 @@ using PromptClipboard.Application.Services;
 using PromptClipboard.Domain;
 using PromptClipboard.Domain.Entities;
 using PromptClipboard.Domain.Interfaces;
+using PromptClipboard.Domain.Models;
 using Serilog;
 using System.Collections.ObjectModel;
-using System.Text.RegularExpressions;
 
 public partial class PaletteViewModel : ObservableObject
 {
@@ -31,11 +31,11 @@ public partial class PaletteViewModel : ObservableObject
     // P0.4: transient load error
     private string? _transientLoadError;
 
-    // P0 scaffold fields (used in later phases, P1 chips + P2 QuickAdd)
-    private long? _pendingNewPromptId;
-#pragma warning disable CS0649 // assigned in P1.6 chips and P2.5 RevealNewPrompt
+    // P1.6: chip mutual exclusion and P2.5 RevealNewPrompt suppress guard
     private bool _suppressRequery;
-#pragma warning restore CS0649
+
+    // P2 scaffold
+    private long? _pendingNewPromptId;
     private PromptItemViewModel? _revealedPrompt;
 
     [ObservableProperty]
@@ -52,6 +52,20 @@ public partial class PaletteViewModel : ObservableObject
 
     [ObservableProperty]
     private bool _hasTarget;
+
+    // P1.5: Sort mode (visible only when no chip overrides sort)
+    [ObservableProperty]
+    private SortMode _currentSortMode = SortMode.Relevance;
+
+    // P1.6: Quick filter chips
+    [ObservableProperty]
+    private bool _isFilterPinned;
+
+    [ObservableProperty]
+    private bool _isFilterRecent;
+
+    [ObservableProperty]
+    private bool _isFilterTemplates;
 
     public ObservableCollection<PromptItemViewModel> Prompts { get; } = [];
 
@@ -184,13 +198,29 @@ public partial class PaletteViewModel : ObservableObject
             OnPropertyChanged(nameof(ShowLoadError));
         }
 
-        var rawQuery = (query ?? SearchText).Trim();
-        var compareKey = BuildSelectionCompareKey(rawQuery);
+        var searchQuery = BuildCurrentQuery();
+        // If explicit query parameter is passed (e.g. from debounce), override text terms
+        if (query != null)
+        {
+            var parsed = SearchQueryParser.Parse(query.Trim());
+            searchQuery = searchQuery with
+            {
+                FreeTextTerms = parsed.FreeTextTerms,
+                IncludeTags = parsed.IncludeTags.Count > 0 ? parsed.IncludeTags : searchQuery.IncludeTags,
+                ExcludeTags = parsed.ExcludeTags.Count > 0 ? parsed.ExcludeTags : searchQuery.ExcludeTags,
+                ExcludeWords = parsed.ExcludeWords.Count > 0 ? parsed.ExcludeWords : searchQuery.ExcludeWords,
+                LangFilter = parsed.LangFilter ?? searchQuery.LangFilter,
+                FolderFilter = parsed.FolderFilter ?? searchQuery.FolderFilter,
+                IsTruncated = parsed.IsTruncated
+            };
+        }
+
+        var compareKey = BuildSelectionCompareKey(searchQuery);
         var previousId = SelectedPrompt?.Prompt.Id;
         var queryChanged = compareKey != _lastLoadedQueryFingerprint;
         _lastLoadedQueryFingerprint = compareKey;
 
-        var searchResult = await _searchService.SearchAsync(rawQuery, ct);
+        var searchResult = await _searchService.SearchAsync(searchQuery, ct);
         _hasMoreResults = searchResult.HasMore;
         _isTruncated = searchResult.IsTruncated;
 
@@ -219,11 +249,18 @@ public partial class PaletteViewModel : ObservableObject
         }
     }
 
-    private static string BuildSelectionCompareKey(string rawQuery)
-        => NormalizeForCompare(rawQuery);
-
-    private static string NormalizeForCompare(string q)
-        => Regex.Replace(q.ToLowerInvariant(), @"\s+", " ");
+    private static string BuildSelectionCompareKey(SearchQuery q)
+        => string.Join("|",
+            $"t:{string.Join(",", q.FreeTextTerms)}",
+            $"inc:{string.Join(",", q.IncludeTags)}",
+            $"excTag:{string.Join(",", q.ExcludeTags)}",
+            $"excWord:{string.Join(",", q.ExcludeWords)}",
+            $"lang:{q.LangFilter ?? ""}",
+            $"folder:{q.FolderFilter ?? ""}",
+            $"pin:{q.PinnedFilter?.ToString() ?? ""}",
+            $"tmpl:{q.HasTemplate?.ToString() ?? ""}",
+            $"recent:{q.RecentLimit?.ToString() ?? ""}",
+            $"sort:{q.Sort}");
 
     [RelayCommand]
     private void MoveUp()
@@ -300,8 +337,11 @@ public partial class PaletteViewModel : ObservableObject
     [RelayCommand]
     private void CreateWithTitle()
     {
-        var (freeText, tagFilter, langFilter) = SearchRankingService.ParseQuery(SearchText);
-        CreateWithTitleRequested?.Invoke(freeText.Trim(), tagFilter, langFilter);
+        var parsed = SearchQueryParser.Parse(SearchText);
+        var title = string.Join(" ", parsed.FreeTextTerms).Trim();
+        var tag = parsed.IncludeTags.Count > 0 ? parsed.IncludeTags[0] : null;
+        var lang = parsed.LangFilter;
+        CreateWithTitleRequested?.Invoke(title, tag, lang);
     }
 
     [RelayCommand]
@@ -336,4 +376,83 @@ public partial class PaletteViewModel : ObservableObject
 
     public void RaiseEditRequested(Prompt prompt) => EditRequested?.Invoke(prompt);
     public void RaiseCopyRequested(Prompt prompt) => CopyRequested?.Invoke(prompt);
+
+    // ── P1.6: Chip mutual exclusion ─────────────────────────────────────
+
+    partial void OnIsFilterPinnedChanged(bool value)
+    {
+        if (_suppressRequery) return;
+        _suppressRequery = true;
+        try
+        {
+            if (value) IsFilterRecent = false;
+        }
+        finally { _suppressRequery = false; }
+        _ = RequeryAsync();
+    }
+
+    partial void OnIsFilterRecentChanged(bool value)
+    {
+        if (_suppressRequery) return;
+        _suppressRequery = true;
+        try
+        {
+            if (value) IsFilterPinned = false;
+        }
+        finally { _suppressRequery = false; }
+        _ = RequeryAsync();
+    }
+
+    partial void OnIsFilterTemplatesChanged(bool value)
+    {
+        if (_suppressRequery) return;
+        _ = RequeryAsync();
+    }
+
+    partial void OnCurrentSortModeChanged(SortMode value)
+    {
+        if (_suppressRequery) return;
+        _ = RequeryAsync();
+    }
+
+    private async Task RequeryAsync()
+    {
+        _searchCts?.Cancel();
+        _searchCts = new CancellationTokenSource();
+        var ct = _searchCts.Token;
+        try { await LoadPromptsAsync(ct: ct); }
+        catch (OperationCanceledException) { }
+        catch (Exception ex)
+        {
+            _log.Error(ex, "RequeryAsync failed");
+        }
+    }
+
+    // ── P1: BuildCurrentQuery ───────────────────────────────────────────
+
+    public SearchQuery BuildCurrentQuery()
+    {
+        var parsed = SearchQueryParser.Parse(SearchText);
+
+        var pinned = IsFilterPinned;
+        var recent = IsFilterRecent;
+        if (pinned && recent)
+        {
+            _log.Warning("Invalid chip state detected (Pinned+Recent=true); forcing Recent=false");
+            recent = false;
+        }
+
+        if (pinned)
+            parsed = parsed with { PinnedFilter = true, RecentLimit = null, Sort = SortMode.PinnedFirst };
+        else if (recent)
+            parsed = parsed with { PinnedFilter = null, RecentLimit = SearchDefaults.MaxResults, Sort = SortMode.Recent };
+
+        if (IsFilterTemplates)
+            parsed = parsed with { HasTemplate = true };
+
+        if (!pinned && !recent && CurrentSortMode != SortMode.Relevance)
+            parsed = parsed with { Sort = CurrentSortMode };
+
+        return parsed;
+    }
 }

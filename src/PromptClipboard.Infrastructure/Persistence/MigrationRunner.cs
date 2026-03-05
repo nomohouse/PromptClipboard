@@ -20,6 +20,7 @@ public sealed class MigrationRunner
     {
         _migrations.Add(("V001", Migrations.V001_InitialSchema));
         _migrations.Add(("V002", Migrations.V002_AddFts5Index));
+        _migrations.Add(("V003", Migrations.V003_AddIndexes));
     }
 
     public void RunAll()

@@ -4,8 +4,9 @@ using Microsoft.Data.Sqlite;
 using PromptClipboard.Domain;
 using PromptClipboard.Domain.Entities;
 using PromptClipboard.Domain.Interfaces;
+using PromptClipboard.Domain.Models;
 
-public sealed class SqlitePromptRepository : IPromptRepository
+public sealed class SqlitePromptRepository : IPromptRepository, IAdvancedSearchRepository
 {
     private readonly SqliteConnectionFactory _factory;
 
@@ -204,6 +205,145 @@ public sealed class SqlitePromptRepository : IPromptRepository
         }, ct);
         return prompts;
     }
+
+    /// <summary>
+    /// Advanced search using SearchQuery AST. Returns up to MaxResults+1 for HasMore detection.
+    /// </summary>
+    public async Task<List<Prompt>> SearchAsync(SearchQuery query, CancellationToken ct = default)
+    {
+        using var conn = _factory.CreateConnection();
+
+        var ftsMatch = FtsQueryBuilder.Build(query);
+        var useFts = ftsMatch != null;
+
+        var sql = new System.Text.StringBuilder();
+        var parameters = new List<(string Name, object Value)>();
+
+        if (useFts)
+        {
+            sql.Append("SELECT p.* FROM prompts p INNER JOIN prompts_fts ON prompts_fts.rowid = p.id WHERE prompts_fts MATCH @ftsQuery");
+            parameters.Add(("@ftsQuery", ftsMatch!));
+        }
+        else
+        {
+            sql.Append("SELECT p.* FROM prompts p WHERE 1=1");
+        }
+
+        // Negative-only fallback: NOT LIKE predicates
+        if (!useFts && query.ExcludeWords.Count > 0)
+        {
+            for (var i = 0; i < query.ExcludeWords.Count; i++)
+            {
+                var paramName = $"@excWord{i}";
+                sql.Append($" AND LOWER(p.title) NOT LIKE '%' || LOWER({paramName}) || '%' ESCAPE '\\'");
+                sql.Append($" AND LOWER(p.body) NOT LIKE '%' || LOWER({paramName}) || '%' ESCAPE '\\'");
+                parameters.Add((paramName, EscapeLike(query.ExcludeWords[i])));
+            }
+        }
+
+        // Include tags (multi-tag AND)
+        var includeTags = query.IncludeTags
+            .Select(t => t.Trim().ToLowerInvariant())
+            .Where(t => t.Length > 0)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        if (includeTags.Count > 0)
+        {
+            sql.Append(" AND (SELECT COUNT(DISTINCT LOWER(TRIM(j.value))) FROM json_each(p.tags_json) j");
+            sql.Append(" WHERE json_valid(p.tags_json) AND TRIM(j.value) != '' AND LOWER(TRIM(j.value)) IN (");
+            var incParams = includeTags.Select((tag, i) => (Name: $"@incTag{i}", Value: (object)tag)).ToList();
+            sql.Append(string.Join(", ", incParams.Select(x => x.Name)));
+            sql.Append(")) = @includeTagCount");
+            parameters.Add(("@includeTagCount", includeTags.Count));
+            foreach (var p in incParams) parameters.Add(p);
+        }
+
+        // Exclude tags
+        var excludeTags = query.ExcludeTags
+            .Select(t => t.Trim().ToLowerInvariant())
+            .Where(t => t.Length > 0)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        if (excludeTags.Count > 0)
+        {
+            sql.Append(" AND NOT EXISTS (SELECT 1 FROM json_each(p.tags_json) j");
+            sql.Append(" WHERE json_valid(p.tags_json) AND TRIM(j.value) != '' AND LOWER(TRIM(j.value)) IN (");
+            var excParams = excludeTags.Select((tag, i) => (Name: $"@excTag{i}", Value: (object)tag)).ToList();
+            sql.Append(string.Join(", ", excParams.Select(x => x.Name)));
+            sql.Append("))");
+            foreach (var p in excParams) parameters.Add(p);
+        }
+
+        // Folder filter
+        if (!string.IsNullOrWhiteSpace(query.FolderFilter))
+        {
+            sql.Append(" AND p.folder = @folder");
+            parameters.Add(("@folder", query.FolderFilter));
+        }
+
+        // Lang filter
+        if (!string.IsNullOrWhiteSpace(query.LangFilter))
+        {
+            sql.Append(" AND p.lang = @lang");
+            parameters.Add(("@lang", query.LangFilter));
+        }
+
+        // Pinned filter
+        if (query.PinnedFilter == true)
+        {
+            sql.Append(" AND p.is_pinned = 1");
+        }
+
+        // Template filter
+        if (query.HasTemplate == true)
+        {
+            sql.Append(" AND p.body LIKE '%{{%'");
+        }
+
+        // Recent filter
+        if (query.RecentLimit.HasValue)
+        {
+            sql.Append(" AND p.last_used_at IS NOT NULL");
+        }
+
+        // Sort
+        sql.Append(" ORDER BY ");
+        switch (query.Sort)
+        {
+            case SortMode.Recent:
+                sql.Append("p.last_used_at DESC, p.id DESC");
+                break;
+            case SortMode.MostUsed:
+                sql.Append("p.use_count DESC, p.last_used_at DESC, p.id DESC");
+                break;
+            case SortMode.PinnedFirst:
+                sql.Append("p.is_pinned DESC, COALESCE(p.last_used_at, p.created_at) DESC, p.id DESC");
+                break;
+            default: // Relevance
+                if (useFts)
+                    sql.Append("bm25(prompts_fts, 10.0, 5.0, 1.0) ASC, p.is_pinned DESC, p.use_count DESC, p.id DESC");
+                else
+                    sql.Append("p.is_pinned DESC, COALESCE(p.last_used_at, p.created_at) DESC, p.use_count DESC, p.id DESC");
+                break;
+        }
+
+        // Limit
+        var limit = query.RecentLimit ?? (SearchDefaults.MaxResults + 1);
+        sql.Append(" LIMIT @limit");
+        parameters.Add(("@limit", limit));
+
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText = sql.ToString();
+        foreach (var (name, value) in parameters)
+            cmd.Parameters.AddWithValue(name, value);
+
+        return await ReadPromptsAsync(cmd, ct);
+    }
+
+    private static string EscapeLike(string word)
+        => word.Replace("\\", "\\\\").Replace("%", "\\%").Replace("_", "\\_");
 
     private static string SanitizeFtsQuery(string query)
     {

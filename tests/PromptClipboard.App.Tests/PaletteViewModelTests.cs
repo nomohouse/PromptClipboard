@@ -5,6 +5,7 @@ using PromptClipboard.App.ViewModels;
 using PromptClipboard.Application.Services;
 using PromptClipboard.Domain;
 using PromptClipboard.Domain.Entities;
+using PromptClipboard.Domain.Models;
 using Serilog;
 using Serilog.Events;
 using Serilog.Sinks.InMemory;
@@ -21,7 +22,7 @@ public class PaletteViewModelTests
         _repo = new FakePromptRepository();
         _sink = new InMemorySink();
         var log = new LoggerConfiguration().WriteTo.Sink(_sink).CreateLogger();
-        var searchService = new SearchRankingService(_repo);
+        var searchService = new SearchRankingService(_repo, _repo);
         _vm = new PaletteViewModel(searchService, _repo, log, debounceMs: 0);
     }
 
@@ -147,13 +148,12 @@ public class PaletteViewModelTests
     }
 
     [Fact]
-    public void ParseQuery_IsAccessibleFromApp()
+    public void SearchQueryParser_IsAccessibleFromApp()
     {
-        // Verify public access from App layer
-        var (query, tag, lang) = SearchRankingService.ParseQuery("#email lang:en hello");
-        Assert.Equal("hello", query);
-        Assert.Equal("email", tag);
-        Assert.Equal("en", lang);
+        var parsed = SearchQueryParser.Parse("#email lang:en hello");
+        Assert.Contains("hello", parsed.FreeTextTerms);
+        Assert.Contains("email", parsed.IncludeTags);
+        Assert.Equal("en", parsed.LangFilter);
     }
 
     [Fact]
@@ -351,5 +351,133 @@ public class PaletteViewModelTests
 
         Assert.False(_vm.ShowLoadError);
         Assert.Null(_vm.TransientLoadError);
+    }
+
+    // ── P1 chip tests ───────────────────────────────────────────────────
+
+    [Fact]
+    public void ChipMergeRules_RecentExcludesPinned()
+    {
+        _vm.IsFilterPinned = true;
+        Assert.True(_vm.IsFilterPinned);
+
+        _vm.IsFilterRecent = true;
+        Assert.True(_vm.IsFilterRecent);
+        Assert.False(_vm.IsFilterPinned); // mutual exclusion
+    }
+
+    [Fact]
+    public void ChipMergeRules_PinnedExcludesRecent()
+    {
+        _vm.IsFilterRecent = true;
+        Assert.True(_vm.IsFilterRecent);
+
+        _vm.IsFilterPinned = true;
+        Assert.True(_vm.IsFilterPinned);
+        Assert.False(_vm.IsFilterRecent); // mutual exclusion
+    }
+
+    [Fact]
+    public void ChipMergeRules_TemplatesIndependent()
+    {
+        _vm.IsFilterPinned = true;
+        _vm.IsFilterTemplates = true;
+        Assert.True(_vm.IsFilterPinned);
+        Assert.True(_vm.IsFilterTemplates);
+    }
+
+    [Fact]
+    public void BuildCurrentQuery_PinnedChip_SetsPinnedFilter()
+    {
+        _vm.IsFilterPinned = true;
+        var q = _vm.BuildCurrentQuery();
+        Assert.True(q.PinnedFilter);
+        Assert.Equal(SortMode.PinnedFirst, q.Sort);
+        Assert.Null(q.RecentLimit);
+    }
+
+    [Fact]
+    public void BuildCurrentQuery_RecentChip_SetsRecentLimit()
+    {
+        _vm.IsFilterRecent = true;
+        var q = _vm.BuildCurrentQuery();
+        Assert.Equal(SearchDefaults.MaxResults, q.RecentLimit);
+        Assert.Equal(SortMode.Recent, q.Sort);
+        Assert.Null(q.PinnedFilter);
+    }
+
+    [Fact]
+    public void BuildCurrentQuery_TemplatesChip_SetsHasTemplate()
+    {
+        _vm.IsFilterTemplates = true;
+        var q = _vm.BuildCurrentQuery();
+        Assert.True(q.HasTemplate);
+    }
+
+    [Fact]
+    public void BuildCurrentQuery_SortMode_AppliedWhenNoChipOverrides()
+    {
+        _vm.CurrentSortMode = SortMode.MostUsed;
+        var q = _vm.BuildCurrentQuery();
+        Assert.Equal(SortMode.MostUsed, q.Sort);
+    }
+
+    [Fact]
+    public void BuildCurrentQuery_SortMode_IgnoredWhenPinnedChip()
+    {
+        _vm.IsFilterPinned = true;
+        _vm.CurrentSortMode = SortMode.MostUsed;
+        var q = _vm.BuildCurrentQuery();
+        Assert.Equal(SortMode.PinnedFirst, q.Sort); // chip wins
+    }
+
+    [Fact]
+    public void BuildCurrentQuery_WithSearchText_MergesTextAndChips()
+    {
+        _vm.SearchText = "hello #email";
+        _vm.IsFilterTemplates = true;
+        var q = _vm.BuildCurrentQuery();
+        Assert.Contains("hello", q.FreeTextTerms);
+        Assert.Contains("email", q.IncludeTags);
+        Assert.True(q.HasTemplate);
+    }
+
+    [Fact]
+    public async Task LoadPrompts_ChipChange_ResetsSelectionAsQueryChanged()
+    {
+        _repo.Prompts.Add(new Prompt { Id = 1, Title = "P1", Body = "B", IsPinned = true });
+        _repo.Prompts.Add(new Prompt { Id = 2, Title = "P2", Body = "B", IsPinned = false });
+        await _vm.LoadPromptsAsync();
+        _vm.SelectedIndex = 1;
+        _vm.SelectedPrompt = _vm.Prompts[1];
+
+        // Toggling chip = different query fingerprint → reset to first
+        _vm.IsFilterPinned = true;
+        await Task.Delay(50); // chip triggers RequeryAsync
+        Assert.Equal(0, _vm.SelectedIndex);
+    }
+
+    [Fact]
+    public void CreateWithTitle_MultiTag_UsesFirstIncludeTag()
+    {
+        string? capturedTag = null;
+        _vm.CreateWithTitleRequested += (_, tag, _) => capturedTag = tag;
+
+        _vm.SearchText = "#email #important hello";
+        _vm.CreateWithTitleCommand.Execute(null);
+
+        Assert.Equal("email", capturedTag);
+    }
+
+    [Fact]
+    public void CreateWithTitle_MultiLang_UsesFirstLangToken()
+    {
+        string? capturedLang = null;
+        _vm.CreateWithTitleRequested += (_, _, lang) => capturedLang = lang;
+
+        _vm.SearchText = "lang:en lang:ru hello";
+        _vm.CreateWithTitleCommand.Execute(null);
+
+        Assert.Equal("en", capturedLang);
     }
 }

@@ -3,8 +3,9 @@ namespace PromptClipboard.Application.Tests.Fakes;
 using PromptClipboard.Domain;
 using PromptClipboard.Domain.Entities;
 using PromptClipboard.Domain.Interfaces;
+using PromptClipboard.Domain.Models;
 
-internal sealed class FakePromptRepository : IPromptRepository
+internal sealed class FakePromptRepository : IPromptRepository, IAdvancedSearchRepository
 {
     private long _nextId = 1;
     public List<Prompt> Prompts { get; set; } = [];
@@ -74,4 +75,65 @@ internal sealed class FakePromptRepository : IPromptRepository
 
     public Task<int> GetCountAsync(CancellationToken ct = default) =>
         Task.FromResult(Prompts.Count);
+
+    public Task<List<Prompt>> SearchAsync(SearchQuery query, CancellationToken ct = default)
+    {
+        var results = Prompts.AsEnumerable();
+
+        if (query.FreeTextTerms.Count > 0)
+        {
+            var terms = query.FreeTextTerms;
+            results = results.Where(p => terms.Any(t =>
+                p.Title.Contains(t, StringComparison.OrdinalIgnoreCase) ||
+                p.Body.Contains(t, StringComparison.OrdinalIgnoreCase)));
+        }
+
+        foreach (var word in query.ExcludeWords)
+        {
+            var w = word;
+            results = results.Where(p =>
+                !p.Title.Contains(w, StringComparison.OrdinalIgnoreCase) &&
+                !p.Body.Contains(w, StringComparison.OrdinalIgnoreCase));
+        }
+
+        foreach (var tag in query.IncludeTags)
+        {
+            var t = tag;
+            results = results.Where(p => p.GetTags().Any(pt =>
+                pt.Equals(t, StringComparison.OrdinalIgnoreCase)));
+        }
+
+        foreach (var tag in query.ExcludeTags)
+        {
+            var t = tag;
+            results = results.Where(p => !p.GetTags().Any(pt =>
+                pt.Equals(t, StringComparison.OrdinalIgnoreCase)));
+        }
+
+        if (!string.IsNullOrWhiteSpace(query.FolderFilter))
+            results = results.Where(p => p.Folder == query.FolderFilter);
+
+        if (!string.IsNullOrWhiteSpace(query.LangFilter))
+            results = results.Where(p => p.Lang.Equals(query.LangFilter, StringComparison.OrdinalIgnoreCase));
+
+        if (query.PinnedFilter == true)
+            results = results.Where(p => p.IsPinned);
+
+        if (query.HasTemplate == true)
+            results = results.Where(p => p.Body.Contains("{{"));
+
+        if (query.RecentLimit.HasValue)
+            results = results.Where(p => p.LastUsedAt.HasValue);
+
+        results = query.Sort switch
+        {
+            SortMode.Recent => results.OrderByDescending(p => p.LastUsedAt).ThenByDescending(p => p.Id),
+            SortMode.MostUsed => results.OrderByDescending(p => p.UseCount).ThenByDescending(p => p.LastUsedAt).ThenByDescending(p => p.Id),
+            SortMode.PinnedFirst => results.OrderByDescending(p => p.IsPinned).ThenByDescending(p => p.LastUsedAt ?? p.CreatedAt).ThenByDescending(p => p.Id),
+            _ => results.OrderByDescending(p => p.IsPinned).ThenByDescending(p => p.LastUsedAt ?? p.CreatedAt).ThenByDescending(p => p.UseCount).ThenByDescending(p => p.Id),
+        };
+
+        var limit = query.RecentLimit ?? (SearchDefaults.MaxResults + 1);
+        return Task.FromResult(results.Take(limit).ToList());
+    }
 }
