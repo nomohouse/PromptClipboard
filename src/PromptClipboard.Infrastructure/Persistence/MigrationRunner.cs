@@ -25,6 +25,8 @@ public sealed class MigrationRunner
         _migrations.Add(("V002", MigrationEntry.FromSql(Migrations.V002_AddFts5Index)));
         _migrations.Add(("V003", MigrationEntry.FromSql(Migrations.V003_AddIndexes)));
         _migrations.Add(("V003b", MigrationEntry.FromCode(Migrations.V003b_AddBodyHash, requiresBackup: true)));
+        _migrations.Add(("V004", MigrationEntry.FromCode(Migrations.V004_NormalizeTags, requiresBackup: true)));
+        _migrations.Add(("V005", MigrationEntry.FromCode(Migrations.V005_CreateSavedViews, requiresBackup: true)));
     }
 
     public void RunAll()

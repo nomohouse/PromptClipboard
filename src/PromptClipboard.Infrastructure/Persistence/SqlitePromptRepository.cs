@@ -35,7 +35,7 @@ public sealed class SqlitePromptRepository : IPromptRepository, IAdvancedSearchR
                 WHERE prompts_fts MATCH @query
             """;
             if (hasTag)
-                sql += " AND EXISTS (SELECT 1 FROM json_each(p.tags_json) WHERE LOWER(json_each.value) = LOWER(@tag))";
+                sql += " AND EXISTS (SELECT 1 FROM prompt_tags pt WHERE pt.prompt_id = p.id AND pt.tag = @tag)";
             if (hasLang)
                 sql += " AND p.lang = @lang";
             sql += " ORDER BY bm25(prompts_fts, 10.0, 5.0, 1.0), p.is_pinned DESC, p.use_count DESC LIMIT @limit";
@@ -44,7 +44,7 @@ public sealed class SqlitePromptRepository : IPromptRepository, IAdvancedSearchR
         {
             sql = "SELECT p.* FROM prompts p WHERE 1=1";
             if (hasTag)
-                sql += " AND EXISTS (SELECT 1 FROM json_each(p.tags_json) WHERE LOWER(json_each.value) = LOWER(@tag))";
+                sql += " AND EXISTS (SELECT 1 FROM prompt_tags pt WHERE pt.prompt_id = p.id AND pt.tag = @tag)";
             if (hasLang)
                 sql += " AND p.lang = @lang";
             sql += " ORDER BY p.is_pinned DESC, COALESCE(p.last_used_at, p.created_at) DESC, p.use_count DESC LIMIT @limit";
@@ -105,33 +105,62 @@ public sealed class SqlitePromptRepository : IPromptRepository, IAdvancedSearchR
     public async Task<long> CreateAsync(Prompt prompt, CancellationToken ct = default)
     {
         using var conn = _factory.CreateConnection();
-        using var cmd = conn.CreateCommand();
-        cmd.CommandText = """
-            INSERT INTO prompts (title, body, tags_json, tags_text, folder, created_at, updated_at, last_used_at, use_count, is_pinned, lang, model_hint, version_parent_id, body_hash)
-            VALUES (@title, @body, @tags_json, @tags_text, @folder, @created_at, @updated_at, @last_used_at, @use_count, @is_pinned, @lang, @model_hint, @version_parent_id, @body_hash);
-            SELECT last_insert_rowid();
-        """;
-        AddPromptParams(cmd, prompt);
-        var result = await Task.Run(() => cmd.ExecuteScalar(), ct);
-        return (long)(result ?? 0);
+        using var tx = conn.BeginTransaction();
+        try
+        {
+            using var cmd = conn.CreateCommand();
+            cmd.Transaction = tx;
+            cmd.CommandText = """
+                INSERT INTO prompts (title, body, tags_json, tags_text, folder, created_at, updated_at, last_used_at, use_count, is_pinned, lang, model_hint, version_parent_id, body_hash)
+                VALUES (@title, @body, @tags_json, @tags_text, @folder, @created_at, @updated_at, @last_used_at, @use_count, @is_pinned, @lang, @model_hint, @version_parent_id, @body_hash);
+                SELECT last_insert_rowid();
+            """;
+            AddPromptParams(cmd, prompt);
+            var result = await Task.Run(() => cmd.ExecuteScalar(), ct);
+            var id = (long)(result ?? 0);
+
+            SyncPromptTags(conn, tx, id, prompt.TagsJson);
+
+            tx.Commit();
+            return id;
+        }
+        catch
+        {
+            tx.Rollback();
+            throw;
+        }
     }
 
     public async Task UpdateAsync(Prompt prompt, CancellationToken ct = default)
     {
         using var conn = _factory.CreateConnection();
-        using var cmd = conn.CreateCommand();
-        cmd.CommandText = """
-            UPDATE prompts SET
-                title = @title, body = @body, tags_json = @tags_json, tags_text = @tags_text,
-                folder = @folder, updated_at = @updated_at, last_used_at = @last_used_at,
-                use_count = @use_count, is_pinned = @is_pinned, lang = @lang,
-                model_hint = @model_hint, version_parent_id = @version_parent_id,
-                body_hash = @body_hash
-            WHERE id = @id
-        """;
-        cmd.Parameters.AddWithValue("@id", prompt.Id);
-        AddPromptParams(cmd, prompt);
-        await Task.Run(() => cmd.ExecuteNonQuery(), ct);
+        using var tx = conn.BeginTransaction();
+        try
+        {
+            using var cmd = conn.CreateCommand();
+            cmd.Transaction = tx;
+            cmd.CommandText = """
+                UPDATE prompts SET
+                    title = @title, body = @body, tags_json = @tags_json, tags_text = @tags_text,
+                    folder = @folder, updated_at = @updated_at, last_used_at = @last_used_at,
+                    use_count = @use_count, is_pinned = @is_pinned, lang = @lang,
+                    model_hint = @model_hint, version_parent_id = @version_parent_id,
+                    body_hash = @body_hash
+                WHERE id = @id
+            """;
+            cmd.Parameters.AddWithValue("@id", prompt.Id);
+            AddPromptParams(cmd, prompt);
+            await Task.Run(() => cmd.ExecuteNonQuery(), ct);
+
+            SyncPromptTags(conn, tx, prompt.Id, prompt.TagsJson);
+
+            tx.Commit();
+        }
+        catch
+        {
+            tx.Rollback();
+            throw;
+        }
     }
 
     public async Task DeleteAsync(long id, CancellationToken ct = default)
@@ -243,7 +272,7 @@ public sealed class SqlitePromptRepository : IPromptRepository, IAdvancedSearchR
             }
         }
 
-        // Include tags (multi-tag AND)
+        // Include tags (multi-tag AND) — uses prompt_tags JOIN (P3)
         var includeTags = query.IncludeTags
             .Select(t => t.Trim().ToLowerInvariant())
             .Where(t => t.Length > 0)
@@ -252,8 +281,8 @@ public sealed class SqlitePromptRepository : IPromptRepository, IAdvancedSearchR
 
         if (includeTags.Count > 0)
         {
-            sql.Append(" AND (SELECT COUNT(DISTINCT LOWER(TRIM(j.value))) FROM json_each(p.tags_json) j");
-            sql.Append(" WHERE json_valid(p.tags_json) AND TRIM(j.value) != '' AND LOWER(TRIM(j.value)) IN (");
+            sql.Append(" AND (SELECT COUNT(DISTINCT pt_inc.tag) FROM prompt_tags pt_inc");
+            sql.Append(" WHERE pt_inc.prompt_id = p.id AND pt_inc.tag IN (");
             var incParams = includeTags.Select((tag, i) => (Name: $"@incTag{i}", Value: (object)tag)).ToList();
             sql.Append(string.Join(", ", incParams.Select(x => x.Name)));
             sql.Append(")) = @includeTagCount");
@@ -261,7 +290,7 @@ public sealed class SqlitePromptRepository : IPromptRepository, IAdvancedSearchR
             foreach (var p in incParams) parameters.Add(p);
         }
 
-        // Exclude tags
+        // Exclude tags — uses prompt_tags JOIN (P3)
         var excludeTags = query.ExcludeTags
             .Select(t => t.Trim().ToLowerInvariant())
             .Where(t => t.Length > 0)
@@ -270,8 +299,8 @@ public sealed class SqlitePromptRepository : IPromptRepository, IAdvancedSearchR
 
         if (excludeTags.Count > 0)
         {
-            sql.Append(" AND NOT EXISTS (SELECT 1 FROM json_each(p.tags_json) j");
-            sql.Append(" WHERE json_valid(p.tags_json) AND TRIM(j.value) != '' AND LOWER(TRIM(j.value)) IN (");
+            sql.Append(" AND NOT EXISTS (SELECT 1 FROM prompt_tags pt_exc");
+            sql.Append(" WHERE pt_exc.prompt_id = p.id AND pt_exc.tag IN (");
             var excParams = excludeTags.Select((tag, i) => (Name: $"@excTag{i}", Value: (object)tag)).ToList();
             sql.Append(string.Join(", ", excParams.Select(x => x.Name)));
             sql.Append("))");
@@ -349,10 +378,7 @@ public sealed class SqlitePromptRepository : IPromptRepository, IAdvancedSearchR
         using var conn = _factory.CreateConnection();
         using var cmd = conn.CreateCommand();
         cmd.CommandText = """
-            SELECT DISTINCT LOWER(TRIM(j.value))
-            FROM prompts p, json_each(p.tags_json) j
-            WHERE json_valid(p.tags_json) AND TRIM(j.value) != ''
-            ORDER BY 1
+            SELECT DISTINCT tag FROM prompt_tags ORDER BY tag
         """;
 
         var tags = new List<string>();
@@ -398,6 +424,37 @@ public sealed class SqlitePromptRepository : IPromptRepository, IAdvancedSearchR
         ftsCmd.Parameters.AddWithValue("@query", ftsQuery);
         ftsCmd.Parameters.AddWithValue("@limit", limit);
         return await ReadPromptsAsync(ftsCmd, ct);
+    }
+
+    /// <summary>
+    /// Keeps prompt_tags in sync with tags_json for a given prompt.
+    /// Deletes existing tags and re-inserts from tags_json within the same transaction.
+    /// </summary>
+    private static void SyncPromptTags(SqliteConnection conn, SqliteTransaction tx, long promptId, string tagsJson)
+    {
+        // Check if prompt_tags table exists (pre-V004 databases)
+        using var checkCmd = conn.CreateCommand();
+        checkCmd.Transaction = tx;
+        checkCmd.CommandText = "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='prompt_tags'";
+        if ((long)checkCmd.ExecuteScalar()! == 0) return;
+
+        using var deleteCmd = conn.CreateCommand();
+        deleteCmd.Transaction = tx;
+        deleteCmd.CommandText = "DELETE FROM prompt_tags WHERE prompt_id = @id";
+        deleteCmd.Parameters.AddWithValue("@id", promptId);
+        deleteCmd.ExecuteNonQuery();
+
+        using var insertCmd = conn.CreateCommand();
+        insertCmd.Transaction = tx;
+        insertCmd.CommandText = """
+            INSERT OR IGNORE INTO prompt_tags (prompt_id, tag)
+                SELECT @id, LOWER(TRIM(j.value))
+                FROM json_each(@tags_json) j
+                WHERE json_valid(@tags_json) AND TRIM(j.value) != ''
+        """;
+        insertCmd.Parameters.AddWithValue("@id", promptId);
+        insertCmd.Parameters.AddWithValue("@tags_json", tagsJson);
+        insertCmd.ExecuteNonQuery();
     }
 
     private static string EscapeLike(string word)

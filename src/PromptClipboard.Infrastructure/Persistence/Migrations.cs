@@ -98,6 +98,105 @@ public static class Migrations
         V003b_BackfillBatched(conn, tx, batchSize: 200);
     }
 
+    public const string V004_NormalizeTagsDdl = """
+        CREATE TABLE IF NOT EXISTS prompt_tags (
+            prompt_id INTEGER NOT NULL REFERENCES prompts(id) ON DELETE CASCADE,
+            tag TEXT NOT NULL,
+            PRIMARY KEY (prompt_id, tag)
+        );
+        CREATE INDEX IF NOT EXISTS idx_prompt_tags_tag ON prompt_tags(tag);
+    """;
+
+    /// <summary>
+    /// V004 code migration: creates prompt_tags table, backfills from json_each(tags_json).
+    /// Called from MigrationRunner via MigrationEntry.FromCode().
+    /// </summary>
+    public static void V004_NormalizeTags(Microsoft.Data.Sqlite.SqliteConnection conn, Microsoft.Data.Sqlite.SqliteTransaction tx)
+    {
+        // DDL — idempotent (IF NOT EXISTS)
+        using var ddlCmd = conn.CreateCommand();
+        ddlCmd.Transaction = tx;
+        ddlCmd.CommandText = V004_NormalizeTagsDdl;
+        ddlCmd.ExecuteNonQuery();
+
+        // Log warning count for invalid JSON
+        using var warnCmd = conn.CreateCommand();
+        warnCmd.Transaction = tx;
+        warnCmd.CommandText = "SELECT COUNT(*) FROM prompts WHERE NOT json_valid(tags_json)";
+        var invalidCount = (long)warnCmd.ExecuteScalar()!;
+        // Warning is logged by MigrationRunner if needed (we pass it via return/side-effect)
+        // For now, rows with invalid JSON are simply skipped by the WHERE clause below.
+
+        // Backfill — idempotent (INSERT OR IGNORE)
+        using var backfillCmd = conn.CreateCommand();
+        backfillCmd.Transaction = tx;
+        backfillCmd.CommandText = """
+            INSERT OR IGNORE INTO prompt_tags (prompt_id, tag)
+                SELECT p.id, LOWER(TRIM(j.value))
+                FROM prompts p, json_each(p.tags_json) j
+                WHERE json_valid(p.tags_json) AND TRIM(j.value) != ''
+        """;
+        backfillCmd.ExecuteNonQuery();
+    }
+
+    public const string V005_CreateSavedViewsSql = """
+        CREATE TABLE IF NOT EXISTS saved_views (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT NOT NULL,
+            query_json TEXT NOT NULL,
+            query_schema_version INTEGER NOT NULL DEFAULT 1,
+            original_schema_version INTEGER,
+            created_at TEXT NOT NULL DEFAULT (datetime('now')),
+            sort_order INTEGER NOT NULL DEFAULT 0
+        )
+    """;
+
+    /// <summary>
+    /// V005 code migration: creates saved_views table with idempotent column guards.
+    /// </summary>
+    public static void V005_CreateSavedViews(Microsoft.Data.Sqlite.SqliteConnection conn, Microsoft.Data.Sqlite.SqliteTransaction tx)
+    {
+        // CREATE TABLE IF NOT EXISTS — safe for first run
+        using var createCmd = conn.CreateCommand();
+        createCmd.Transaction = tx;
+        createCmd.CommandText = V005_CreateSavedViewsSql;
+        createCmd.ExecuteNonQuery();
+
+        // Fail-fast for incompatible legacy schemas
+        if (!HasColumn(conn, tx, "saved_views", "name") || !HasColumn(conn, tx, "saved_views", "query_json"))
+            throw new IncompatibleSchemaException("saved_views schema is incompatible; manual migration required");
+
+        // Guard: ensure additive required columns exist on pre-existing table
+        EnsureColumnExists(conn, tx, "saved_views", "original_schema_version", "INTEGER");
+        EnsureColumnExists(conn, tx, "saved_views", "query_schema_version", "INTEGER NOT NULL DEFAULT 1");
+        EnsureColumnExists(conn, tx, "saved_views", "created_at", "TEXT");
+        EnsureColumnExists(conn, tx, "saved_views", "sort_order", "INTEGER NOT NULL DEFAULT 0");
+
+        // Backfill nullable created_at introduced by ALTER path
+        using var fixCreatedAt = conn.CreateCommand();
+        fixCreatedAt.Transaction = tx;
+        fixCreatedAt.CommandText = "UPDATE saved_views SET created_at = datetime('now') WHERE created_at IS NULL";
+        fixCreatedAt.ExecuteNonQuery();
+    }
+
+    internal static bool HasColumn(Microsoft.Data.Sqlite.SqliteConnection conn, Microsoft.Data.Sqlite.SqliteTransaction tx, string table, string column)
+    {
+        using var cmd = conn.CreateCommand();
+        cmd.Transaction = tx;
+        cmd.CommandText = $"SELECT COUNT(*) FROM pragma_table_info('{table}') WHERE name='{column}'";
+        return (long)cmd.ExecuteScalar()! > 0;
+    }
+
+    internal static void EnsureColumnExists(Microsoft.Data.Sqlite.SqliteConnection conn, Microsoft.Data.Sqlite.SqliteTransaction tx, string table, string column, string ddlType)
+    {
+        if (HasColumn(conn, tx, table, column)) return;
+
+        using var cmd = conn.CreateCommand();
+        cmd.Transaction = tx;
+        cmd.CommandText = $"ALTER TABLE {table} ADD COLUMN {column} {ddlType}";
+        cmd.ExecuteNonQuery();
+    }
+
     internal static void V003b_BackfillBatched(Microsoft.Data.Sqlite.SqliteConnection conn, Microsoft.Data.Sqlite.SqliteTransaction tx, int batchSize)
     {
         while (true)
