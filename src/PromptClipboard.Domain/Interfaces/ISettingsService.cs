@@ -15,6 +15,11 @@ public class AppSettings
     public int SeedVersion { get; set; }
     public List<string> SeedAppliedKeys { get; set; } = [];
     public bool SeedBootstrapStarted { get; set; }
+
+    // Metrics (P4.4)
+    public bool EnableUsageStats { get; set; }
+    public int StatsRetentionDays { get; set; } = 90;
+    public int StatsMaxRows { get; set; } = 100_000;
 }
 
 public interface ISettingsService

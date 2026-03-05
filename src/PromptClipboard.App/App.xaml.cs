@@ -106,6 +106,21 @@ public partial class App : System.Windows.Application
                 _services.GetRequiredService<ISettingsService>(),
                 _log);
 
+            // Analytics cleanup (runs if enabled)
+            var currentSettings = _services.GetRequiredService<ISettingsService>().Load();
+            if (currentSettings.EnableUsageStats)
+            {
+                try
+                {
+                    var analytics = _services.GetRequiredService<IAnalyticsService>();
+                    await analytics.CleanupAsync(currentSettings.StatsRetentionDays, currentSettings.StatsMaxRows);
+                }
+                catch (Exception ex)
+                {
+                    _log.Warning(ex, "Analytics cleanup failed (non-fatal)");
+                }
+            }
+
             // Palette window
             _paletteWindow = new PaletteWindow();
             _paletteWindow.Width = Win32WindowPositioner.DefaultPaletteWidth;
@@ -251,6 +266,7 @@ public partial class App : System.Windows.Application
         services.AddSingleton<IUpdateService, VelopackUpdateService>();
         services.AddSingleton<PastePromptUseCase>();
         services.AddSingleton<IStartupErrorHandler, StartupErrorHandler>();
+        services.AddSingleton<IAnalyticsService>(new SqliteAnalyticsService(AppDataPath, Log.Logger));
         services.AddSingleton<PaletteViewModel>();
     }
 
