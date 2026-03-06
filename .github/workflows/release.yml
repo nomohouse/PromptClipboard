@@ -124,6 +124,8 @@ jobs:
             --packVersion "${{ steps.version.outputs.version }}" `
             --packDir artifacts/publish `
             --mainExe PromptClipboard.App.exe `
+            --packAuthors "PromptClipboard" `
+            --packTitle "Prompt Clipboard" `
             --icon src/PromptClipboard.App/Resources/app.ico `
             --outputDir artifacts/velopack
 
