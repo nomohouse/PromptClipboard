@@ -91,7 +91,7 @@
                 <TextBlock Grid.Column="0" Text="&#xE721;" FontFamily="Segoe MDL2 Assets"
                           Foreground="{StaticResource TextDimBrush}" VerticalAlignment="Center" Margin="0,0,8,0" FontSize="16"/>
                 <Grid Grid.Column="1">
-                    <TextBox x:Name="SearchBox"
+                    <TextBox x:Name="SearchBox" AutomationProperties.AutomationId="SearchBox"
                             Text="{Binding SearchText, UpdateSourceTrigger=PropertyChanged}"
                             Background="Transparent" Foreground="{StaticResource TextBrush}"
                             BorderThickness="0" FontSize="14" VerticalAlignment="Center"
@@ -519,7 +519,7 @@
             </ScrollViewer>
 
             <!-- Prompt List (visible when Mode=List) -->
-            <ListBox x:Name="PromptListBox" Grid.Row="6" Margin="16,0,16,16"
+            <ListBox x:Name="PromptListBox" AutomationProperties.AutomationId="PromptList" Grid.Row="6" Margin="16,0,16,16"
                      ItemsSource="{Binding Prompts}"
                      SelectedItem="{Binding SelectedPrompt, Mode=TwoWay}"
                      SelectedIndex="{Binding SelectedIndex, Mode=TwoWay}"
